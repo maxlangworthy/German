@@ -647,20 +647,35 @@ app.post("/api/start", (req, res) => {
     scenario: scenarioKey,
   } = req.body ?? {};
 
+
   const result = getScenario(
     language,
     scenarioKey
   );
 
+
   if (result.error) {
     return res.status(400).json({
-      error: result.error,
+      error:
+        result.error,
     });
   }
 
+
   return res.json({
-    reply: result.scenario.opening,
-    conversationEnded: false,
+    reply:
+      result.scenario.opening,
+
+    replyLookupForms:
+      result.scenario
+        .openingLookupForms,
+
+    replyPartsOfSpeech:
+      result.scenario
+        .openingPartsOfSpeech,
+
+    conversationEnded:
+      false,
   });
 });
 
@@ -748,7 +763,7 @@ app.post("/api/chat", async (req, res) => {
           effort: "none",
         },
 
-        max_output_tokens: 300,
+        max_output_tokens: 450,
 
         store: false,
 
