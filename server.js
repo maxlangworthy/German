@@ -331,98 +331,191 @@ function parseJsonArray(value) {
 }
 
 
-function compactDictionaryRows(rows, requestedWord) {
-  const exactCaseRows = [];
-  const otherRows = [];
+function compactDictionaryRows(
+  rows,
+  requestedWord,
+  requestedPos = ""
+) {
+  const parsedRows = rows.map((row) => ({
+    ...row,
 
-  for (const row of rows) {
-    if (row.word === requestedWord) {
-      exactCaseRows.push(row);
-    } else {
-      otherRows.push(row);
-    }
-  }
+    parsedMeanings:
+      parseJsonArray(row.meanings),
 
-  const orderedRows = [
-    ...exactCaseRows,
-    ...otherRows
-  ];
+    parsedLemmas:
+      parseJsonArray(row.lemmas),
+
+    parsedGrammar:
+      parseJsonArray(row.grammar),
+  }));
+
+
+  // Direct dictionary entries are more trustworthy
+  // than rows where the word only appears as an
+  // inflected form of another lemma.
+  const directRows =
+    parsedRows
+      .filter(
+        (row) =>
+          row.parsedMeanings.length > 0
+      )
+      .sort((a, b) => {
+        const aPosMatch =
+          requestedPos &&
+          a.pos === requestedPos
+            ? 1
+            : 0;
+
+        const bPosMatch =
+          requestedPos &&
+          b.pos === requestedPos
+            ? 1
+            : 0;
+
+        if (aPosMatch !== bPosMatch) {
+          return bPosMatch - aPosMatch;
+        }
+
+
+        const aCaseMatch =
+          a.word === requestedWord
+            ? 1
+            : 0;
+
+        const bCaseMatch =
+          b.word === requestedWord
+            ? 1
+            : 0;
+
+        return bCaseMatch - aCaseMatch;
+      });
+
+
+  const formRows =
+    parsedRows.filter(
+      (row) =>
+        row.parsedLemmas.length > 0
+    );
+
 
   const results = [];
   const seen = new Set();
 
-  for (const row of orderedRows) {
-    const directMeanings =
-      parseJsonArray(row.meanings);
 
-    const lemmas =
-      parseJsonArray(row.lemmas);
+  // First use genuine dictionary-headword entries.
+  for (const row of directRows) {
+    const key =
+      `${row.word}|${row.pos}|${row.parsedMeanings.join("|")}`;
 
-    const grammar =
-      parseJsonArray(row.grammar);
-
-
-    if (directMeanings.length > 0) {
-      const key =
-        `${row.word}|${row.pos}|${directMeanings.join("|")}`;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-
-        results.push({
-          word: row.word,
-          lemma: row.word,
-          partOfSpeech: row.pos,
-          meanings: directMeanings.slice(0, 3),
-          grammar: [],
-        });
-      }
+    if (seen.has(key)) {
+      continue;
     }
 
+    seen.add(key);
 
-    for (const lemma of lemmas.slice(0, 3)) {
+    results.push({
+      word: row.word,
+      lemma: row.word,
+      partOfSpeech: row.pos,
+      meanings:
+        row.parsedMeanings.slice(0, 3),
+      grammar: [],
+    });
+
+    if (results.length >= 4) {
+      return results;
+    }
+  }
+
+
+  // If necessary, fall back to entries that
+  // point from an inflected form to a lemma.
+  for (const row of formRows) {
+    for (
+      const lemma
+      of row.parsedLemmas.slice(0, 3)
+    ) {
       const lemmaRows =
         dictionaryLookup.all(
           normalizeGermanWord(lemma)
         );
 
-      for (const lemmaRow of lemmaRows) {
-        const lemmaMeanings =
-          parseJsonArray(lemmaRow.meanings);
 
-        if (lemmaMeanings.length === 0) {
-          continue;
-        }
+      const parsedLemmaRows =
+        lemmaRows
+          .map((lemmaRow) => ({
+            ...lemmaRow,
+            parsedMeanings:
+              parseJsonArray(
+                lemmaRow.meanings
+              ),
+          }))
+          .filter(
+            (lemmaRow) =>
+              lemmaRow.parsedMeanings.length > 0
+          )
+          .sort((a, b) => {
+            const aMatch =
+              requestedPos &&
+              a.pos === requestedPos
+                ? 1
+                : 0;
 
-        const key =
-          `${lemma}|${lemmaRow.pos}|${lemmaMeanings.join("|")}`;
+            const bMatch =
+              requestedPos &&
+              b.pos === requestedPos
+                ? 1
+                : 0;
 
-        if (seen.has(key)) {
-          continue;
-        }
+            return bMatch - aMatch;
+          });
 
-        seen.add(key);
 
-        results.push({
-          word: row.word,
-          lemma,
-          partOfSpeech: lemmaRow.pos,
-          meanings: lemmaMeanings.slice(0, 3),
-          grammar: grammar.slice(0, 8),
-        });
+      const bestLemmaRow =
+        parsedLemmaRows[0];
 
-        break;
+
+      if (!bestLemmaRow) {
+        continue;
       }
-    }
 
-    if (results.length >= 4) {
-      break;
+
+      const key =
+        `${lemma}|${bestLemmaRow.pos}|${bestLemmaRow.parsedMeanings.join("|")}`;
+
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+
+      seen.add(key);
+
+
+      results.push({
+        word: row.word,
+        lemma,
+        partOfSpeech:
+          bestLemmaRow.pos,
+        meanings:
+          bestLemmaRow
+            .parsedMeanings
+            .slice(0, 3),
+        grammar:
+          row.parsedGrammar
+            .slice(0, 8),
+      });
+
+
+      if (results.length >= 4) {
+        return results;
+      }
     }
   }
 
-  return results.slice(0, 4);
-}
 
+  return results;
+}
 
 // ---------------------------------------------------------
 // Basic routes
@@ -459,13 +552,21 @@ app.get("/api/word", (req, res) => {
     });
   }
 
+
   const language = String(
     req.query.language || ""
   ).toLowerCase();
 
+
   const rawWord = String(
     req.query.word || ""
   );
+
+
+  const requestedPos = String(
+    req.query.pos || ""
+  ).toLowerCase();
+
 
   if (language !== "german") {
     return res.status(400).json({
@@ -474,8 +575,10 @@ app.get("/api/word", (req, res) => {
     });
   }
 
+
   const word =
     cleanLookupWord(rawWord);
+
 
   if (!word || word.length > 80) {
     return res.status(400).json({
@@ -484,10 +587,13 @@ app.get("/api/word", (req, res) => {
     });
   }
 
+
   try {
-    const rows = dictionaryLookup.all(
-      normalizeGermanWord(word)
-    );
+    const rows =
+      dictionaryLookup.all(
+        normalizeGermanWord(word)
+      );
+
 
     if (rows.length === 0) {
       return res.json({
@@ -497,15 +603,19 @@ app.get("/api/word", (req, res) => {
       });
     }
 
+
     const entries =
       compactDictionaryRows(
         rows,
-        word
+        word,
+        requestedPos
       );
+
 
     return res.json({
       word,
-      found: entries.length > 0,
+      found:
+        entries.length > 0,
       entries,
     });
 
@@ -513,9 +623,11 @@ app.get("/api/word", (req, res) => {
     console.error(
       "Dictionary lookup failed",
       {
-        message: error?.message,
+        message:
+          error?.message,
       }
     );
+
 
     return res.status(500).json({
       error:
