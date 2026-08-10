@@ -1,38 +1,44 @@
 import {
   mkdir,
   rm,
-  stat
+  stat,
+  copyFile,
+  rename,
 } from "node:fs/promises";
 
 import {
-  createReadStream
+  createReadStream,
 } from "node:fs";
 
 import {
   dirname,
-  resolve
+  resolve,
 } from "node:path";
 
 import {
-  Readable
+  Readable,
 } from "node:stream";
 
 import {
-  createGunzip
+  createGunzip,
 } from "node:zlib";
 
 import readline
   from "node:readline";
 
 import {
-  DatabaseSync
+  DatabaseSync,
 } from "node:sqlite";
 
 import {
   LANGUAGES,
-  getLanguage
+  getLanguage,
 } from "./languages.js";
 
+
+// ---------------------------------------------------------
+// BUILD SETTINGS
+// ---------------------------------------------------------
 
 const REQUESTED_LANGUAGE =
   process.env.DICTIONARY_LANGUAGE ||
@@ -52,6 +58,47 @@ const SOURCE_FILE_OVERRIDE =
 const OUTPUT_PATH_OVERRIDE =
   process.env.DICTIONARY_OUTPUT_PATH ||
   null;
+
+
+/*
+  Render preserves XDG_CACHE_HOME
+  between builds.
+
+  We store our finished SQLite
+  dictionaries there.
+
+  If we ever change the database format
+  significantly, we can change v1 to v2
+  and Render will rebuild them.
+*/
+
+const CACHE_VERSION =
+  process.env.DICTIONARY_CACHE_VERSION ||
+  "v1";
+
+
+const CACHE_ROOT =
+  process.env.XDG_CACHE_HOME
+    ? resolve(
+        process.env.XDG_CACHE_HOME,
+        "language-learning-dictionaries",
+        CACHE_VERSION
+      )
+    : resolve(
+        ".dictionary-cache",
+        CACHE_VERSION
+      );
+
+
+/*
+  Set REBUILD_DICTIONARIES=1 in Render
+  only if we deliberately want to ignore
+  the cache and rebuild every dictionary.
+*/
+
+const FORCE_REBUILD =
+  process.env.REBUILD_DICTIONARIES ===
+  "1";
 
 
 const MAX_MEANINGS =
@@ -81,7 +128,7 @@ const NON_WORD_POS =
 
 
 // ---------------------------------------------------------
-// General language-aware word handling
+// NORMALISATION
 // ---------------------------------------------------------
 
 function normalizeWord(
@@ -99,7 +146,9 @@ function normalizeWord(
 function cleanText(
   value
 ) {
-  return String(value)
+  return String(
+    value
+  )
     .replace(
       /\s+/g,
       " "
@@ -117,14 +166,16 @@ function uniqueStrings(
 ) {
   return [
     ...new Set(
-      values.filter(Boolean)
-    )
+      values.filter(
+        Boolean
+      )
+    ),
   ];
 }
 
 
 // ---------------------------------------------------------
-// Reduce a Wiktionary entry
+// REDUCE ONE WIKTIONARY ENTRY
 // ---------------------------------------------------------
 
 function extractLeanEntry(
@@ -150,7 +201,9 @@ function extractLeanEntry(
 
   if (
     !word ||
-    /\s/u.test(word) ||
+    /\s/u.test(
+      word
+    ) ||
     word.length > 80
   ) {
     return null;
@@ -173,9 +226,16 @@ function extractLeanEntry(
   }
 
 
-  const meanings = [];
-  const lemmas = [];
-  const grammarTags = [];
+  const meanings =
+    [];
+
+
+  const lemmas =
+    [];
+
+
+  const grammarTags =
+    [];
 
 
   for (
@@ -201,7 +261,9 @@ function extractLeanEntry(
       );
 
 
-    if (isFormSense) {
+    if (
+      isFormSense
+    ) {
       for (
         const relation
         of formOf
@@ -261,7 +323,9 @@ function extractLeanEntry(
         );
 
 
-      if (gloss) {
+      if (
+        gloss
+      ) {
         meanings.push(
           gloss
         );
@@ -331,7 +395,7 @@ function extractLeanEntry(
 
 
 // ---------------------------------------------------------
-// Expand inflected forms
+// EXPAND INFLECTED FORMS
 // ---------------------------------------------------------
 
 function extractInflectedForms(
@@ -351,7 +415,9 @@ function extractInflectedForms(
   }
 
 
-  const results = [];
+  const results =
+    [];
+
 
   const seen =
     new Set();
@@ -380,7 +446,9 @@ function extractInflectedForms(
       form === "-" ||
       form ===
         lemmaEntry.word ||
-      /\s/u.test(form) ||
+      /\s/u.test(
+        form
+      ) ||
       form.length > 80
     ) {
       continue;
@@ -414,7 +482,9 @@ function extractInflectedForms(
 
 
     if (
-      seen.has(key)
+      seen.has(
+        key
+      )
     ) {
       continue;
     }
@@ -438,7 +508,8 @@ function extractInflectedForms(
       pos:
         lemmaEntry.pos,
 
-      meanings: [],
+      meanings:
+        [],
 
       lemmas: [
         lemmaEntry.word
@@ -454,7 +525,7 @@ function extractInflectedForms(
 
 
 // ---------------------------------------------------------
-// Work out which dictionaries to build
+// WHICH LANGUAGES SHOULD WE BUILD?
 // ---------------------------------------------------------
 
 function resolveBuildTargets() {
@@ -485,7 +556,9 @@ function resolveBuildTargets() {
     );
 
 
-  if (!language) {
+  if (
+    !language
+  ) {
     throw new Error(
       `Unknown DICTIONARY_LANGUAGE '${REQUESTED_LANGUAGE}'. Supported: ${Object.keys(
         LANGUAGES
@@ -501,10 +574,15 @@ function resolveBuildTargets() {
 
 
 // ---------------------------------------------------------
-// Get compressed dictionary source
+// GET KAIKKI SOURCE STREAM
+//
+// Supports both:
+//
+// .jsonl
+// .jsonl.gz
 // ---------------------------------------------------------
 
-async function getCompressedSourceStream(
+async function getSourceStream(
   language
 ) {
   if (
@@ -515,19 +593,37 @@ async function getCompressedSourceStream(
     );
 
 
+    const fileStream =
+      createReadStream(
+        SOURCE_FILE_OVERRIDE
+      );
+
+
+    const isCompressed =
+      SOURCE_FILE_OVERRIDE
+        .toLowerCase()
+        .endsWith(
+          ".gz"
+        );
+
+
     return {
       stream:
-        createReadStream(
-          SOURCE_FILE_OVERRIDE
-        ),
+        isCompressed
+          ? fileStream.pipe(
+              createGunzip()
+            )
+          : fileStream,
 
       metadata: {
         source:
           SOURCE_FILE_OVERRIDE,
 
-        etag: "",
+        etag:
+          "",
 
-        lastModified: "",
+        lastModified:
+          "",
       },
     };
   }
@@ -567,11 +663,31 @@ async function getCompressedSourceStream(
   }
 
 
+  const downloadedStream =
+    Readable.fromWeb(
+      response.body
+    );
+
+
+  const isCompressed =
+    language
+      .dictionary
+      .compressed ===
+        true ||
+    sourceUrl
+      .toLowerCase()
+      .endsWith(
+        ".gz"
+      );
+
+
   return {
     stream:
-      Readable.fromWeb(
-        response.body
-      ),
+      isCompressed
+        ? downloadedStream.pipe(
+            createGunzip()
+          )
+        : downloadedStream,
 
     metadata: {
       source:
@@ -592,21 +708,73 @@ async function getCompressedSourceStream(
 
 
 // ---------------------------------------------------------
-// Build one language dictionary
+// CHECK A CACHED SQLITE DICTIONARY
+// ---------------------------------------------------------
+
+async function cachedDictionaryIsValid(
+  cachePath,
+  language
+) {
+  try {
+    const fileStats =
+      await stat(
+        cachePath
+      );
+
+
+    if (
+      fileStats.size <
+      10000
+    ) {
+      return false;
+    }
+
+
+    const db =
+      new DatabaseSync(
+        cachePath,
+        {
+          readOnly:
+            true,
+        }
+      );
+
+
+    const statement =
+      db.prepare(`
+        SELECT value
+        FROM metadata
+        WHERE key = 'language_id'
+        LIMIT 1
+      `);
+
+
+    const row =
+      statement.get();
+
+
+    db.close();
+
+
+    return (
+      row?.value ===
+      language.id
+    );
+
+  } catch {
+    return false;
+  }
+}
+
+
+// ---------------------------------------------------------
+// BUILD ONE SQLITE DATABASE
 // ---------------------------------------------------------
 
 async function buildDictionary(
-  language
+  language,
+  outputPath
 ) {
-  const outputPath =
-    resolve(
-      OUTPUT_PATH_OVERRIDE ||
-      language
-        .dictionary
-        .path
-    );
-
-
   await mkdir(
     dirname(
       outputPath
@@ -700,22 +868,12 @@ async function buildDictionary(
 
   const {
     stream:
-      compressedStream,
+      source,
 
     metadata,
   } =
-    await getCompressedSourceStream(
+    await getSourceStream(
       language
-    );
-
-
-  const gunzip =
-    createGunzip();
-
-
-  const source =
-    compressedStream.pipe(
-      gunzip
     );
 
 
@@ -732,14 +890,18 @@ async function buildDictionary(
   let sourceLines =
     0;
 
+
   let keptEntries =
     0;
+
 
   let generatedInflectedForms =
     0;
 
+
   let skippedEntries =
     0;
+
 
   let transactionCount =
     0;
@@ -790,7 +952,9 @@ async function buildDictionary(
         );
 
 
-      if (!entry) {
+      if (
+        !entry
+      ) {
         skippedEntries +=
           1;
 
@@ -842,6 +1006,7 @@ async function buildDictionary(
 
         keptEntries +=
           1;
+
 
         transactionCount +=
           1;
@@ -1026,7 +1191,9 @@ async function buildDictionary(
       `Output: ${outputPath}`
     );
 
-  } catch (error) {
+  } catch (
+    error
+  ) {
     try {
       db.exec(
         "ROLLBACK"
@@ -1039,13 +1206,171 @@ async function buildDictionary(
 
     db.close();
 
+
+    await rm(
+      outputPath,
+      {
+        force:
+          true,
+      }
+    );
+
+
     throw error;
   }
 }
 
 
 // ---------------------------------------------------------
-// Build every configured language
+// RESTORE FROM CACHE OR BUILD
+// ---------------------------------------------------------
+
+async function prepareDictionary(
+  language
+) {
+  const outputPath =
+    resolve(
+      OUTPUT_PATH_OVERRIDE ||
+      language
+        .dictionary
+        .path
+    );
+
+
+  const cachePath =
+    resolve(
+      CACHE_ROOT,
+      `${language.id}.sqlite`
+    );
+
+
+  await mkdir(
+    dirname(
+      outputPath
+    ),
+    {
+      recursive:
+        true,
+    }
+  );
+
+
+  await mkdir(
+    CACHE_ROOT,
+    {
+      recursive:
+        true,
+    }
+  );
+
+
+  /*
+    If Render already has a valid cached
+    dictionary, simply copy it into the
+    current deployment.
+  */
+
+  if (
+    !FORCE_REBUILD &&
+    await cachedDictionaryIsValid(
+      cachePath,
+      language
+    )
+  ) {
+    console.log(
+      `${language.name}: restoring dictionary from build cache.`
+    );
+
+
+    await copyFile(
+      cachePath,
+      outputPath
+    );
+
+
+    const fileStats =
+      await stat(
+        outputPath
+      );
+
+
+    console.log(
+      `${language.name}: restored ${(fileStats.size / 1024 / 1024).toFixed(1)} MiB.`
+    );
+
+
+    return;
+  }
+
+
+  /*
+    No usable cache exists.
+
+    Download Kaikki and build it once.
+  */
+
+  console.log(
+    `${language.name}: no usable cached dictionary found. Building now.`
+  );
+
+
+  await buildDictionary(
+    language,
+    outputPath
+  );
+
+
+  /*
+    Save completed DB into Render's
+    build cache.
+
+    Write to a temporary cache file
+    first, so a failed copy never leaves
+    a corrupt file that looks valid.
+  */
+
+  const temporaryCachePath =
+    `${cachePath}.tmp`;
+
+
+  await rm(
+    temporaryCachePath,
+    {
+      force:
+        true,
+    }
+  );
+
+
+  await copyFile(
+    outputPath,
+    temporaryCachePath
+  );
+
+
+  await rm(
+    cachePath,
+    {
+      force:
+        true,
+    }
+  );
+
+
+  await rename(
+    temporaryCachePath,
+    cachePath
+  );
+
+
+  console.log(
+    `${language.name}: saved completed dictionary to Render build cache.`
+  );
+}
+
+
+// ---------------------------------------------------------
+// MAIN
 // ---------------------------------------------------------
 
 async function main() {
@@ -1053,14 +1378,44 @@ async function main() {
     resolveBuildTargets();
 
 
+  console.log(
+    `Dictionary cache directory: ${CACHE_ROOT}`
+  );
+
+
+  console.log(
+    `Dictionary cache version: ${CACHE_VERSION}`
+  );
+
+
   for (
     const language
     of targets
   ) {
-    await buildDictionary(
+    console.log(
+      `\n========================================`
+    );
+
+
+    console.log(
+      `Preparing ${language.name}`
+    );
+
+
+    console.log(
+      `========================================`
+    );
+
+
+    await prepareDictionary(
       language
     );
   }
+
+
+  console.log(
+    "\nAll configured dictionaries are ready."
+  );
 }
 
 
@@ -1072,6 +1427,8 @@ main().catch(
     );
 
 
-    process.exit(1);
+    process.exit(
+      1
+    );
   }
 );
