@@ -1,15 +1,16 @@
 {
   "name": "ai-language-learning-backend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Backend API for the AI language-learning MVP",
   "main": "server.js",
   "scripts": {
+    "build:dictionary": "node build-dictionary.js",
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.14.0 <25"
   },
   "dependencies": {
     "express": "^5.2.1",
