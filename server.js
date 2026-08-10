@@ -1,11 +1,18 @@
 import express from "express";
 import OpenAI from "openai";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { SCENARIOS } from "./scenarios.js";
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 const MODEL = "gpt-5.6-luna";
+
+const DICTIONARY_PATH = resolve(
+  process.env.GERMAN_DICTIONARY_PATH || "data/german.sqlite"
+);
 
 
 // ---------------------------------------------------------
@@ -23,13 +30,36 @@ const openai = new OpenAI({
 
 
 // ---------------------------------------------------------
+// German dictionary setup
+// ---------------------------------------------------------
+
+let dictionaryDb = null;
+let dictionaryLookup = null;
+
+if (existsSync(DICTIONARY_PATH)) {
+  dictionaryDb = new DatabaseSync(DICTIONARY_PATH, {
+    readOnly: true,
+  });
+
+  dictionaryLookup = dictionaryDb.prepare(`
+    SELECT word, pos, meanings, lemmas, grammar
+    FROM lexicon
+    WHERE normalized = ?
+    LIMIT 16
+  `);
+
+  console.log(`German dictionary ready: ${DICTIONARY_PATH}`);
+} else {
+  console.warn(
+    `German dictionary not found at ${DICTIONARY_PATH}. Word lookup will be unavailable.`
+  );
+}
+
+
+// ---------------------------------------------------------
 // Basic middleware
 // ---------------------------------------------------------
 
-// Simple CORS setup for the MVP.
-// This currently allows requests from any frontend origin.
-// Later, once your frontend has a permanent URL, we can
-// restrict this to that specific domain.
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -42,13 +72,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Parse incoming JSON.
-// The size limit prevents accidentally accepting enormous requests.
 app.use(express.json({ limit: "100kb" }));
 
 
 // ---------------------------------------------------------
-// Structured output schema
+// Structured AI output schema
 // ---------------------------------------------------------
 
 const chatResponseSchema = {
@@ -87,7 +115,7 @@ const chatResponseSchema = {
       required: [
         "hasIssues",
         "correctedVersion",
-        "explanation",
+        "explanation"
       ],
 
       additionalProperties: false,
@@ -103,7 +131,7 @@ const chatResponseSchema = {
   required: [
     "reply",
     "feedback",
-    "conversationEnded",
+    "conversationEnded"
   ],
 
   additionalProperties: false,
@@ -111,7 +139,7 @@ const chatResponseSchema = {
 
 
 // ---------------------------------------------------------
-// Validation helpers
+// Helpers
 // ---------------------------------------------------------
 
 function getScenario(language, scenarioKey) {
@@ -146,7 +174,6 @@ function validateHistory(history) {
     };
   }
 
-  // Enough for the MVP while preventing extremely large requests.
   if (history.length > 50) {
     return {
       error:
@@ -200,10 +227,6 @@ function validateHistory(history) {
 }
 
 
-// ---------------------------------------------------------
-// AI instructions
-// ---------------------------------------------------------
-
 function buildSystemPrompt(scenario) {
   return `You are powering a German conversation-practice app.
 
@@ -229,6 +252,131 @@ CONVERSATION BEHAVIOUR
 }
 
 
+function normalizeGermanWord(value) {
+  return value
+    .normalize("NFC")
+    .toLocaleLowerCase("de-DE");
+}
+
+
+function cleanLookupWord(value) {
+  return value
+    .normalize("NFC")
+    .trim()
+    .replace(
+      /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,
+      ""
+    );
+}
+
+
+function parseJsonArray(value) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+
+function compactDictionaryRows(rows, requestedWord) {
+  const exactCaseRows = [];
+  const otherRows = [];
+
+  for (const row of rows) {
+    if (row.word === requestedWord) {
+      exactCaseRows.push(row);
+    } else {
+      otherRows.push(row);
+    }
+  }
+
+  const orderedRows = [
+    ...exactCaseRows,
+    ...otherRows
+  ];
+
+  const results = [];
+  const seen = new Set();
+
+  for (const row of orderedRows) {
+    const directMeanings =
+      parseJsonArray(row.meanings);
+
+    const lemmas =
+      parseJsonArray(row.lemmas);
+
+    const grammar =
+      parseJsonArray(row.grammar);
+
+
+    if (directMeanings.length > 0) {
+      const key =
+        `${row.word}|${row.pos}|${directMeanings.join("|")}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+
+        results.push({
+          word: row.word,
+          lemma: row.word,
+          partOfSpeech: row.pos,
+          meanings: directMeanings.slice(0, 3),
+          grammar: [],
+        });
+      }
+    }
+
+
+    for (const lemma of lemmas.slice(0, 3)) {
+      const lemmaRows =
+        dictionaryLookup.all(
+          normalizeGermanWord(lemma)
+        );
+
+      for (const lemmaRow of lemmaRows) {
+        const lemmaMeanings =
+          parseJsonArray(lemmaRow.meanings);
+
+        if (lemmaMeanings.length === 0) {
+          continue;
+        }
+
+        const key =
+          `${lemma}|${lemmaRow.pos}|${lemmaMeanings.join("|")}`;
+
+        if (seen.has(key)) {
+          continue;
+        }
+
+        seen.add(key);
+
+        results.push({
+          word: row.word,
+          lemma,
+          partOfSpeech: lemmaRow.pos,
+          meanings: lemmaMeanings.slice(0, 3),
+          grammar: grammar.slice(0, 8),
+        });
+
+        break;
+      }
+    }
+
+    if (results.length >= 4) {
+      break;
+    }
+  }
+
+  return results.slice(0, 4);
+}
+
+
 // ---------------------------------------------------------
 // Basic routes
 // ---------------------------------------------------------
@@ -244,7 +392,89 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
+    dictionary:
+      dictionaryLookup
+        ? "ready"
+        : "unavailable",
   });
+});
+
+
+// ---------------------------------------------------------
+// Dictionary lookup — zero OpenAI usage
+// ---------------------------------------------------------
+
+app.get("/api/word", (req, res) => {
+  if (!dictionaryLookup) {
+    return res.status(503).json({
+      error:
+        "The German dictionary is not available on the server.",
+    });
+  }
+
+  const language = String(
+    req.query.language || ""
+  ).toLowerCase();
+
+  const rawWord = String(
+    req.query.word || ""
+  );
+
+  if (language !== "german") {
+    return res.status(400).json({
+      error:
+        "For this MVP, language must be 'german'.",
+    });
+  }
+
+  const word =
+    cleanLookupWord(rawWord);
+
+  if (!word || word.length > 80) {
+    return res.status(400).json({
+      error:
+        "word must be a valid German word of 80 characters or fewer.",
+    });
+  }
+
+  try {
+    const rows = dictionaryLookup.all(
+      normalizeGermanWord(word)
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        word,
+        found: false,
+        entries: [],
+      });
+    }
+
+    const entries =
+      compactDictionaryRows(
+        rows,
+        word
+      );
+
+    return res.json({
+      word,
+      found: entries.length > 0,
+      entries,
+    });
+
+  } catch (error) {
+    console.error(
+      "Dictionary lookup failed",
+      {
+        message: error?.message,
+      }
+    );
+
+    return res.status(500).json({
+      error:
+        "The dictionary lookup could not be completed.",
+    });
+  }
 });
 
 
@@ -289,7 +519,6 @@ app.post("/api/chat", async (req, res) => {
   } = req.body ?? {};
 
 
-  // Validate language and scenario
   const scenarioResult = getScenario(
     language,
     scenarioKey
@@ -302,7 +531,6 @@ app.post("/api/chat", async (req, res) => {
   }
 
 
-  // Validate newest message
   if (
     typeof message !== "string" ||
     !message.trim()
@@ -313,6 +541,7 @@ app.post("/api/chat", async (req, res) => {
     });
   }
 
+
   if (message.length > 2000) {
     return res.status(400).json({
       error:
@@ -321,7 +550,6 @@ app.post("/api/chat", async (req, res) => {
   }
 
 
-  // Validate history
   const historyResult =
     validateHistory(history);
 
@@ -332,14 +560,13 @@ app.post("/api/chat", async (req, res) => {
   }
 
 
-  // Construct the complete conversation
-  // that OpenAI will receive.
   const input = [
     {
       role: "system",
-      content: buildSystemPrompt(
-        scenarioResult.scenario
-      ),
+      content:
+        buildSystemPrompt(
+          scenarioResult.scenario
+        ),
     },
 
     ...historyResult.history,
@@ -352,36 +579,27 @@ app.post("/api/chat", async (req, res) => {
 
 
   try {
-    // ONE OpenAI request produces:
-    // 1. the conversational reply
-    // 2. the feedback
-    // 3. the conversation-ended decision
     const response =
       await openai.responses.create({
         model: MODEL,
 
         input,
 
-        // This is a lightweight conversation task.
-        // We can test "low" later if it noticeably
-        // improves German feedback quality.
         reasoning: {
           effort: "none",
         },
 
-        // Keeps responses/costs bounded.
         max_output_tokens: 300,
 
-        // We are managing conversation history ourselves.
         store: false,
 
-        // Strict JSON Schema structured output.
         text: {
           format: {
             type: "json_schema",
             name:
               "language_learning_chat_response",
-            schema: chatResponseSchema,
+            schema:
+              chatResponseSchema,
             strict: true,
           },
         },
@@ -400,14 +618,11 @@ app.post("/api/chat", async (req, res) => {
     }
 
 
-    // Structured Outputs guarantees the response
-    // follows the schema, but output_text is still text,
-    // so convert that JSON text into a JavaScript object.
-    const parsed = JSON.parse(
-      response.output_text
-    );
+    const parsed =
+      JSON.parse(response.output_text);
 
     return res.json(parsed);
+
   } catch (error) {
     const status = error?.status;
 
@@ -416,8 +631,6 @@ app.post("/api/chat", async (req, res) => {
       error?.requestID;
 
 
-    // Log useful debugging information,
-    // but never log the API key or full conversation.
     console.error(
       "OpenAI request failed",
       {
