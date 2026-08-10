@@ -11,29 +11,47 @@ export const SCENARIOS = {
     opening:
       "Guten Tag! Was darf es für Sie sein?",
 
-    // One dictionary lookup form for each word
-    // in the opening, in the same order.
-    openingLookupForms: [
-      "gut",
-      "Tag",
-      "was",
-      "dürfen",
-      "es",
-      "für",
-      "Sie",
-      "sein"
-    ],
-
-    // Very coarse part-of-speech tags.
-    openingPartsOfSpeech: [
-      "adj",
-      "noun",
-      "pron",
-      "verb",
-      "pron",
-      "prep",
-      "pron",
-      "verb"
+    openingReplyWords: [
+      {
+        surface: "Guten",
+        lookup: "gut",
+        pos: "adj",
+      },
+      {
+        surface: "Tag",
+        lookup: "Tag",
+        pos: "noun",
+      },
+      {
+        surface: "Was",
+        lookup: "was",
+        pos: "pron",
+      },
+      {
+        surface: "darf",
+        lookup: "dürfen",
+        pos: "verb",
+      },
+      {
+        surface: "es",
+        lookup: "es",
+        pos: "pron",
+      },
+      {
+        surface: "für",
+        lookup: "für",
+        pos: "prep",
+      },
+      {
+        surface: "Sie",
+        lookup: "Sie",
+        pos: "pron",
+      },
+      {
+        surface: "sein",
+        lookup: "sein",
+        pos: "verb",
+      },
     ],
   },
 
@@ -51,32 +69,62 @@ export const SCENARIOS = {
     opening:
       "Guten Morgen! Wie war dein Wochenende? Hast du etwas Schönes gemacht?",
 
-    openingLookupForms: [
-      "gut",
-      "Morgen",
-      "wie",
-      "sein",
-      "dein",
-      "Wochenende",
-      "haben",
-      "du",
-      "etwas",
-      "schön",
-      "machen"
-    ],
-
-    openingPartsOfSpeech: [
-      "adj",
-      "noun",
-      "adv",
-      "verb",
-      "det",
-      "noun",
-      "verb",
-      "pron",
-      "pron",
-      "adj",
-      "verb"
+    openingReplyWords: [
+      {
+        surface: "Guten",
+        lookup: "gut",
+        pos: "adj",
+      },
+      {
+        surface: "Morgen",
+        lookup: "Morgen",
+        pos: "noun",
+      },
+      {
+        surface: "Wie",
+        lookup: "wie",
+        pos: "adv",
+      },
+      {
+        surface: "war",
+        lookup: "sein",
+        pos: "verb",
+      },
+      {
+        surface: "dein",
+        lookup: "dein",
+        pos: "det",
+      },
+      {
+        surface: "Wochenende",
+        lookup: "Wochenende",
+        pos: "noun",
+      },
+      {
+        surface: "Hast",
+        lookup: "haben",
+        pos: "verb",
+      },
+      {
+        surface: "du",
+        lookup: "du",
+        pos: "pron",
+      },
+      {
+        surface: "etwas",
+        lookup: "etwas",
+        pos: "pron",
+      },
+      {
+        surface: "Schönes",
+        lookup: "schön",
+        pos: "adj",
+      },
+      {
+        surface: "gemacht",
+        lookup: "machen",
+        pos: "verb",
+      },
     ],
   },
 
@@ -94,30 +142,57 @@ export const SCENARIOS = {
     opening:
       "Entschuldigung, können Sie mir sagen, wie ich zum Bahnhof komme?",
 
-    openingLookupForms: [
-      "Entschuldigung",
-      "können",
-      "Sie",
-      "mir",
-      "sagen",
-      "wie",
-      "ich",
-      "zum",
-      "Bahnhof",
-      "kommen"
-    ],
-
-    openingPartsOfSpeech: [
-      "noun",
-      "verb",
-      "pron",
-      "pron",
-      "verb",
-      "adv",
-      "pron",
-      "prep",
-      "noun",
-      "verb"
+    openingReplyWords: [
+      {
+        surface: "Entschuldigung",
+        lookup: "Entschuldigung",
+        pos: "noun",
+      },
+      {
+        surface: "können",
+        lookup: "können",
+        pos: "verb",
+      },
+      {
+        surface: "Sie",
+        lookup: "Sie",
+        pos: "pron",
+      },
+      {
+        surface: "mir",
+        lookup: "mir",
+        pos: "pron",
+      },
+      {
+        surface: "sagen",
+        lookup: "sagen",
+        pos: "verb",
+      },
+      {
+        surface: "wie",
+        lookup: "wie",
+        pos: "adv",
+      },
+      {
+        surface: "ich",
+        lookup: "ich",
+        pos: "pron",
+      },
+      {
+        surface: "zum",
+        lookup: "zum",
+        pos: "prep",
+      },
+      {
+        surface: "Bahnhof",
+        lookup: "Bahnhof",
+        pos: "noun",
+      },
+      {
+        surface: "komme",
+        lookup: "kommen",
+        pos: "verb",
+      },
     ],
   },
 };
