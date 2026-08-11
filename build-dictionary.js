@@ -56,15 +56,6 @@ const OUTPUT_PATH_OVERRIDE =
   null;
 
 
-/*
-  v2 deliberately uses a new Render
-  cache folder.
-
-  That forces one clean rebuild because
-  meanings now contain structured
-  senses + usage tags.
-*/
-
 const CACHE_VERSION =
   process.env.DICTIONARY_CACHE_VERSION ||
   "v2-sense-tags";
@@ -100,6 +91,19 @@ const COMMIT_EVERY =
   25000;
 
 
+function languageHasDictionary(
+  language
+) {
+
+  return Boolean(
+    language?.dictionary?.sourceUrl &&
+    language?.dictionary?.path &&
+    language?.wiktionaryLanguageCode
+  );
+
+}
+
+
 const NON_WORD_POS =
   new Set([
     "character",
@@ -114,47 +118,21 @@ const NON_WORD_POS =
   ]);
 
 
-/*
-  Sense tags such as:
-
-  slang
-  vulgar
-  colloquial
-  dated
-  Spain
-  Mexico
-
-  are useful to learners.
-
-  But grammatical tags such as feminine,
-  plural or subjunctive would make the
-  meaning list unnecessarily cluttered.
-
-  We therefore remove grammatical tags
-  from the learner-facing sense labels.
-*/
-
 const HIDDEN_SENSE_TAGS =
   new Set([
-
     "form-of",
-
     "masculine",
     "feminine",
     "neuter",
     "common-gender",
-
     "singular",
     "plural",
     "dual",
-
     "countable",
     "uncountable",
-
     "first-person",
     "second-person",
     "third-person",
-
     "present",
     "past",
     "future",
@@ -162,26 +140,20 @@ const HIDDEN_SENSE_TAGS =
     "imperfect",
     "perfect",
     "pluperfect",
-
     "imperative",
     "indicative",
     "subjunctive",
     "conditional",
-
     "infinitive",
     "participle",
     "gerund",
-
     "comparative",
     "superlative",
     "positive",
-
     "attributive",
     "predicative",
-
     "definite",
     "indefinite",
-
     "nominative",
     "accusative",
     "dative",
@@ -190,10 +162,8 @@ const HIDDEN_SENSE_TAGS =
     "instrumental",
     "locative",
     "ablative",
-
     "animate",
     "inanimate",
-
   ]);
 
 
@@ -515,11 +485,8 @@ function extractLeanEntry(
 
 
     senses.push({
-
       meaning,
-
       tags,
-
     });
 
 
@@ -769,6 +736,8 @@ function resolveBuildTargets() {
 
     return Object.values(
       LANGUAGES
+    ).filter(
+      languageHasDictionary
     );
 
   }
@@ -788,6 +757,19 @@ function resolveBuildTargets() {
       `Unknown DICTIONARY_LANGUAGE '${REQUESTED_LANGUAGE}'. Supported: ${Object.keys(
         LANGUAGES
       ).join(", ")}, all.`
+    );
+
+  }
+
+
+  if (
+    !languageHasDictionary(
+      language
+    )
+  ) {
+
+    throw new Error(
+      `${language.name} does not use a local Kaikki/Wiktionary dictionary in this version of the app.`
     );
 
   }
@@ -950,7 +932,7 @@ async function getSourceStream(
 
 
 // ---------------------------------------------------------
-// Cache validation
+// Cache
 // ---------------------------------------------------------
 
 async function cachedDictionaryIsValid(
@@ -987,22 +969,18 @@ async function cachedDictionaryIsValid(
 
 
     const languageRow =
-      db.prepare(`
-        SELECT value
-        FROM metadata
-        WHERE key = 'language_id'
-        LIMIT 1
-      `)
+      db
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'language_id' LIMIT 1"
+        )
         .get();
 
 
     const formatRow =
-      db.prepare(`
-        SELECT value
-        FROM metadata
-        WHERE key = 'dictionary_format'
-        LIMIT 1
-      `)
+      db
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'dictionary_format' LIMIT 1"
+        )
         .get();
 
 
@@ -1210,7 +1188,6 @@ async function buildDictionary(
         skippedEntries +=
           1;
 
-
         continue;
 
       }
@@ -1229,7 +1206,6 @@ async function buildDictionary(
 
         skippedEntries +=
           1;
-
 
         continue;
 
@@ -1519,7 +1495,7 @@ async function buildDictionary(
 
 
 // ---------------------------------------------------------
-// Restore/build dictionary
+// Prepare dictionary
 // ---------------------------------------------------------
 
 async function prepareDictionary(
@@ -1598,7 +1574,7 @@ async function prepareDictionary(
 
 
   console.log(
-    `${language.name}: no usable v2 cached dictionary found. Building now.`
+    `${language.name}: no usable cached dictionary found. Building now.`
   );
 
 
@@ -1669,6 +1645,16 @@ async function main() {
   );
 
 
+  console.log(
+    `Dictionary-backed languages: ${targets.map(
+      (
+        language
+      ) =>
+        language.name
+    ).join(", ")}`
+  );
+
+
   for (
     const language
     of targets
@@ -1697,7 +1683,7 @@ async function main() {
 
 
   console.log(
-    "\nAll configured dictionaries are ready."
+    "\nAll configured local dictionaries are ready."
   );
 
 }
