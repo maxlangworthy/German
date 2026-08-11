@@ -6,13 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { LANGUAGES, getLanguage } from "./languages.js";
 import { SCENARIOS } from "./scenarios.js";
 
-
-// ---------------------------------------------------------
-// App settings
-// ---------------------------------------------------------
-
-const app =
-  express();
+const app = express();
 
 const PORT =
   process.env.PORT ||
@@ -23,12 +17,6 @@ const MODEL =
 
 const MAX_CUSTOM_SCENARIO_LENGTH =
   2000;
-
-
-// More generous output ceilings.
-//
-// These are maximums, not targets.
-// The model can still finish much earlier.
 
 const MAX_CUSTOM_OPENING_TOKENS =
   900;
@@ -148,6 +136,7 @@ const CEFR_LEVELS = {
 if (
   !process.env.OPENAI_API_KEY
 ) {
+
   console.error(
     "OPENAI_API_KEY is not set."
   );
@@ -155,6 +144,7 @@ if (
   process.exit(
     1
   );
+
 }
 
 
@@ -216,6 +206,7 @@ for (
   const lookup =
     db.prepare(`
       SELECT
+        id,
         word,
         pos,
         meanings,
@@ -223,6 +214,7 @@ for (
         grammar
       FROM lexicon
       WHERE normalized = ?
+      ORDER BY id ASC
       LIMIT 16
     `);
 
@@ -384,18 +376,12 @@ const chatResponseSchema = {
     reply: {
       type:
         "string",
-
-      description:
-        "The natural in-character reply in the selected target language.",
     },
 
 
     replyWords: {
       type:
         "array",
-
-      description:
-        "Dictionary metadata for the lexical words in reply.",
 
       items:
         wordMetadataSchema,
@@ -412,9 +398,6 @@ const chatResponseSchema = {
         hasIssues: {
           type:
             "boolean",
-
-          description:
-            "True only when the learner's newest message contains a meaningful grammar, wording, vocabulary, register, or naturalness issue worth correcting.",
         },
 
 
@@ -423,18 +406,12 @@ const chatResponseSchema = {
             "string",
             "null"
           ],
-
-          description:
-            "A corrected natural version of the learner's newest message in the selected target language, or null when no correction is needed.",
         },
 
 
         explanation: {
           type:
             "string",
-
-          description:
-            "A concise explanation in English. Use exactly 'No correction needed.' when hasIssues is false.",
         },
 
       },
@@ -456,9 +433,6 @@ const chatResponseSchema = {
     conversationEnded: {
       type:
         "boolean",
-
-      description:
-        "True only when the learner's newest message clearly and naturally ends the interaction.",
     },
 
   },
@@ -488,18 +462,12 @@ const customOpeningSchema = {
     reply: {
       type:
         "string",
-
-      description:
-        "The opening message for the custom conversation in the selected target language.",
     },
 
 
     replyWords: {
       type:
         "array",
-
-      description:
-        "Dictionary metadata for the lexical words in reply.",
 
       items:
         wordMetadataSchema,
@@ -530,27 +498,18 @@ const exampleResponseSchema = {
     exampleMessage: {
       type:
         "string",
-
-      description:
-        "A natural learner response in the selected target language, appropriate to the selected learner level and the current conversation.",
     },
 
 
     exampleTranslation: {
       type:
         "string",
-
-      description:
-        "A concise natural English translation of exampleMessage.",
     },
 
 
     exampleWords: {
       type:
         "array",
-
-      description:
-        "Dictionary metadata for the lexical words in exampleMessage.",
 
       items:
         wordMetadataSchema,
@@ -560,18 +519,12 @@ const exampleResponseSchema = {
     reply: {
       type:
         "string",
-
-      description:
-        "The natural in-character reply to exampleMessage in the selected target language.",
     },
 
 
     replyWords: {
       type:
         "array",
-
-      description:
-        "Dictionary metadata for the lexical words in reply.",
 
       items:
         wordMetadataSchema,
@@ -581,9 +534,6 @@ const exampleResponseSchema = {
     conversationEnded: {
       type:
         "boolean",
-
-      description:
-        "True only if the generated learner example naturally ends the interaction and the character's reply closes it.",
     },
 
   },
@@ -627,16 +577,12 @@ function getLevel(
   }
 
 
-  const normalized =
-    String(
-      levelId
-    )
-      .toLowerCase();
-
-
   return (
     CEFR_LEVELS[
-      normalized
+      String(
+        levelId
+      )
+        .toLowerCase()
     ] ||
     null
   );
@@ -690,8 +636,6 @@ function getConversationSetup(
 
   }
 
-
-  // Custom scenario
 
   if (
     scenarioKey ===
@@ -756,8 +700,6 @@ function getConversationSetup(
 
   }
 
-
-  // Preset scenario
 
   const scenario =
     SCENARIOS[
@@ -843,10 +785,6 @@ function getConversationSetup(
 
 }
 
-
-// ---------------------------------------------------------
-// History validation
-// ---------------------------------------------------------
 
 function validateHistory(
   history
@@ -1230,10 +1168,6 @@ function extractVisibleWords(
 }
 
 
-// ---------------------------------------------------------
-// Word metadata alignment
-// ---------------------------------------------------------
-
 function alignWordMetadata(
   text,
   modelWords,
@@ -1361,24 +1295,15 @@ function alignWordMetadata(
         );
 
 
-      if (
+      dp[i][j] =
         visibleKey ===
         candidateKey
-      ) {
-
-        dp[i][j] =
-          1 +
-          dp[i + 1][j + 1];
-
-      } else {
-
-        dp[i][j] =
-          Math.max(
-            dp[i + 1][j],
-            dp[i][j + 1]
-          );
-
-      }
+          ? 1 +
+            dp[i + 1][j + 1]
+          : Math.max(
+              dp[i + 1][j],
+              dp[i][j + 1]
+            );
 
     }
 
@@ -1548,7 +1473,7 @@ function alignWordMetadata(
 
 
 // ---------------------------------------------------------
-// Dictionary helpers
+// Dictionary sense handling
 // ---------------------------------------------------------
 
 function parseJsonArray(
@@ -1587,6 +1512,292 @@ function parseJsonArray(
 }
 
 
+function parseStoredSenses(
+  value
+) {
+
+  const raw =
+    parseJsonArray(
+      value
+    );
+
+
+  const senses =
+    [];
+
+
+  for (
+    const item
+    of raw
+  ) {
+
+    /*
+      Backwards compatibility with
+      the original dictionary format.
+    */
+
+    if (
+      typeof item ===
+        "string" &&
+      item.trim()
+    ) {
+
+      senses.push({
+        meaning:
+          item.trim(),
+
+        tags:
+          [],
+      });
+
+
+      continue;
+
+    }
+
+
+    if (
+      !item ||
+      typeof item !==
+        "object" ||
+      typeof item.meaning !==
+        "string"
+    ) {
+
+      continue;
+
+    }
+
+
+    const meaning =
+      item.meaning.trim();
+
+
+    if (
+      !meaning
+    ) {
+
+      continue;
+
+    }
+
+
+    const tags =
+      Array.isArray(
+        item.tags
+      )
+        ? [
+            ...new Set(
+              item.tags
+                .filter(
+                  (
+                    tag
+                  ) =>
+                    typeof tag ===
+                      "string" &&
+                    tag.trim()
+                )
+                .map(
+                  (
+                    tag
+                  ) =>
+                    tag.trim()
+                )
+            )
+          ].slice(
+            0,
+            8
+          )
+        : [];
+
+
+    senses.push({
+      meaning,
+      tags,
+    });
+
+  }
+
+
+  return senses;
+
+}
+
+
+/*
+  These scores only affect ordering.
+
+  Nothing is removed from the dictionary.
+*/
+
+const TAG_PENALTIES =
+  new Map([
+
+    [
+      "vulgar",
+      8
+    ],
+
+    [
+      "offensive",
+      8
+    ],
+
+    [
+      "derogatory",
+      7
+    ],
+
+    [
+      "pejorative",
+      7
+    ],
+
+    [
+      "slang",
+      5
+    ],
+
+    [
+      "nonstandard",
+      4
+    ],
+
+    [
+      "obsolete",
+      5
+    ],
+
+    [
+      "archaic",
+      4
+    ],
+
+    [
+      "dated",
+      3
+    ],
+
+    [
+      "rare",
+      3
+    ],
+
+    [
+      "literary",
+      1
+    ],
+
+    [
+      "poetic",
+      1
+    ],
+
+  ]);
+
+
+function sensePenalty(
+  sense
+) {
+
+  return (
+    Array.isArray(
+      sense?.tags
+    )
+      ? sense.tags
+      : []
+  ).reduce(
+    (
+      total,
+      tag
+    ) =>
+      total +
+      (
+        TAG_PENALTIES.get(
+          String(
+            tag
+          )
+            .toLowerCase()
+        ) ||
+        0
+      ),
+    0
+  );
+
+}
+
+
+function rankSenses(
+  senses
+) {
+
+  return senses
+    .map(
+      (
+        sense,
+        index
+      ) => ({
+
+        ...sense,
+
+        _index:
+          index,
+
+        _penalty:
+          sensePenalty(
+            sense
+          ),
+
+      })
+    )
+    .sort(
+      (
+        a,
+        b
+      ) =>
+        a._penalty -
+          b._penalty ||
+        a._index -
+          b._index
+    )
+    .map(
+      (
+        {
+          _index,
+          _penalty,
+          ...sense
+        }
+      ) =>
+        sense
+    );
+
+}
+
+
+function rowBestPenalty(
+  row
+) {
+
+  if (
+    !row.parsedSenses.length
+  ) {
+
+    return 999;
+
+  }
+
+
+  return Math.min(
+    ...row
+      .parsedSenses
+      .map(
+        sensePenalty
+      )
+  );
+
+}
+
+
 function compactDictionaryRows(
   rows,
   requestedWord,
@@ -1603,8 +1814,8 @@ function compactDictionaryRows(
 
         ...row,
 
-        parsedMeanings:
-          parseJsonArray(
+        parsedSenses:
+          parseStoredSenses(
             row.meanings
           ),
 
@@ -1637,7 +1848,7 @@ function compactDictionaryRows(
           row
         ) =>
           row
-            .parsedMeanings
+            .parsedSenses
             .length >
           0
       )
@@ -1676,6 +1887,25 @@ function compactDictionaryRows(
           }
 
 
+          const penaltyDifference =
+            rowBestPenalty(
+              a
+            ) -
+            rowBestPenalty(
+              b
+            );
+
+
+          if (
+            penaltyDifference !==
+            0
+          ) {
+
+            return penaltyDifference;
+
+          }
+
+
           const aCaseMatch =
             a.word ===
               requestedWord
@@ -1690,9 +1920,22 @@ function compactDictionaryRows(
               : 0;
 
 
+          if (
+            aCaseMatch !==
+            bCaseMatch
+          ) {
+
+            return (
+              bCaseMatch -
+              aCaseMatch
+            );
+
+          }
+
+
           return (
-            bCaseMatch -
-            aCaseMatch
+            a.id -
+            b.id
           );
 
         }
@@ -1724,8 +1967,19 @@ function compactDictionaryRows(
     of directRows
   ) {
 
+    const senses =
+      rankSenses(
+        row.parsedSenses
+      ).slice(
+        0,
+        5
+      );
+
+
     const key =
-      `${row.word}|${row.pos}|${row.parsedMeanings.join("|")}`;
+      `${row.word}|${row.pos}|${JSON.stringify(
+        senses
+      )}`;
 
 
     if (
@@ -1755,10 +2009,19 @@ function compactDictionaryRows(
       partOfSpeech:
         row.pos,
 
+      senses,
+
+      /*
+        Keep meanings too so an older
+        frontend remains compatible.
+      */
+
       meanings:
-        row.parsedMeanings.slice(
-          0,
-          3
+        senses.map(
+          (
+            sense
+          ) =>
+            sense.meaning
         ),
 
       grammar:
@@ -1786,10 +2049,12 @@ function compactDictionaryRows(
 
     for (
       const lemma
-      of row.parsedLemmas.slice(
-        0,
-        3
-      )
+      of row
+        .parsedLemmas
+        .slice(
+          0,
+          3
+        )
     ) {
 
       const lemmaRows =
@@ -1800,11 +2065,7 @@ function compactDictionaryRows(
               lemma,
               language
             )
-          );
-
-
-      const parsedLemmaRows =
-        lemmaRows
+          )
           .map(
             (
               lemmaRow
@@ -1812,8 +2073,8 @@ function compactDictionaryRows(
 
               ...lemmaRow,
 
-              parsedMeanings:
-                parseJsonArray(
+              parsedSenses:
+                parseStoredSenses(
                   lemmaRow.meanings
                 ),
 
@@ -1824,7 +2085,7 @@ function compactDictionaryRows(
               lemmaRow
             ) =>
               lemmaRow
-                .parsedMeanings
+                .parsedSenses
                 .length >
               0
           )
@@ -1834,7 +2095,7 @@ function compactDictionaryRows(
               b
             ) => {
 
-              const aMatch =
+              const aPosMatch =
                 usefulRequestedPos &&
                 a.pos ===
                   usefulRequestedPos
@@ -1842,7 +2103,7 @@ function compactDictionaryRows(
                   : 0;
 
 
-              const bMatch =
+              const bPosMatch =
                 usefulRequestedPos &&
                 b.pos ===
                   usefulRequestedPos
@@ -1850,9 +2111,34 @@ function compactDictionaryRows(
                   : 0;
 
 
+              if (
+                aPosMatch !==
+                bPosMatch
+              ) {
+
+                return (
+                  bPosMatch -
+                  aPosMatch
+                );
+
+              }
+
+
+              const penaltyDifference =
+                rowBestPenalty(
+                  a
+                ) -
+                rowBestPenalty(
+                  b
+                );
+
+
               return (
-                bMatch -
-                aMatch
+                penaltyDifference !==
+                0
+                  ? penaltyDifference
+                  : a.id -
+                    b.id
               );
 
             }
@@ -1860,7 +2146,7 @@ function compactDictionaryRows(
 
 
       const bestLemmaRow =
-        parsedLemmaRows[0];
+        lemmaRows[0];
 
 
       if (
@@ -1872,8 +2158,20 @@ function compactDictionaryRows(
       }
 
 
+      const senses =
+        rankSenses(
+          bestLemmaRow
+            .parsedSenses
+        ).slice(
+          0,
+          5
+        );
+
+
       const key =
-        `${lemma}|${bestLemmaRow.pos}|${bestLemmaRow.parsedMeanings.join("|")}`;
+        `${lemma}|${bestLemmaRow.pos}|${JSON.stringify(
+          senses
+        )}`;
 
 
       if (
@@ -1902,17 +2200,23 @@ function compactDictionaryRows(
         partOfSpeech:
           bestLemmaRow.pos,
 
+        senses,
+
         meanings:
-          bestLemmaRow.parsedMeanings.slice(
-            0,
-            3
+          senses.map(
+            (
+              sense
+            ) =>
+              sense.meaning
           ),
 
         grammar:
-          row.parsedGrammar.slice(
-            0,
-            8
-          ),
+          row
+            .parsedGrammar
+            .slice(
+              0,
+              8
+            ),
 
       });
 
@@ -1944,17 +2248,13 @@ function getResponseRefusal(
   response
 ) {
 
-  const output =
-    Array.isArray(
+  for (
+    const outputItem
+    of Array.isArray(
       response?.output
     )
       ? response.output
-      : [];
-
-
-  for (
-    const outputItem
-    of output
+      : []
   ) {
 
     if (
@@ -2029,28 +2329,10 @@ function parseStructuredResponse(
   label
 ) {
 
-  /*
-    IMPORTANT:
-
-    An OpenAI request can successfully
-    return a Response object but still
-    have status "incomplete".
-
-    We must check that BEFORE attempting
-    JSON.parse().
-  */
-
   if (
     response?.status ===
     "incomplete"
   ) {
-
-    const reason =
-      response
-        ?.incomplete_details
-        ?.reason ||
-      "unknown";
-
 
     throw createResponseProcessingError(
       "OPENAI_RESPONSE_INCOMPLETE",
@@ -2058,22 +2340,22 @@ function parseStructuredResponse(
       `${label} was incomplete.`,
 
       {
-        reason,
+
+        reason:
+          response
+            ?.incomplete_details
+            ?.reason ||
+          "unknown",
 
         responseId:
           response?.id ||
           null,
+
       }
     );
 
   }
 
-
-  /*
-    Structured outputs may also contain
-    a refusal rather than the requested
-    JSON schema.
-  */
 
   const refusal =
     getResponseRefusal(
@@ -2091,21 +2373,18 @@ function parseStructuredResponse(
       `${label} was refused.`,
 
       {
+
         refusal,
 
         responseId:
           response?.id ||
           null,
+
       }
     );
 
   }
 
-
-  /*
-    If the request completed but there is
-    no output_text, don't try to parse it.
-  */
 
   if (
     typeof response?.output_text !==
@@ -2119,6 +2398,7 @@ function parseStructuredResponse(
       `${label} returned no output text.`,
 
       {
+
         responseStatus:
           response?.status ||
           null,
@@ -2126,20 +2406,12 @@ function parseStructuredResponse(
         responseId:
           response?.id ||
           null,
+
       }
     );
 
   }
 
-
-  /*
-    Finally parse the Structured Output.
-
-    If this fails, it is now logged as a
-    structured-output parsing problem,
-    rather than being incorrectly labelled
-    as an OpenAI API/network failure.
-  */
 
   try {
 
@@ -2157,12 +2429,15 @@ function parseStructuredResponse(
       `${label} returned invalid JSON.`,
 
       {
+
         parseMessage:
           parseError?.message ||
           "Unknown JSON parsing error",
 
         outputLength:
-          response.output_text.length,
+          response
+            .output_text
+            .length,
 
         responseStatus:
           response?.status ||
@@ -2171,6 +2446,7 @@ function parseStructuredResponse(
         responseId:
           response?.id ||
           null,
+
       }
     );
 
@@ -2218,30 +2494,18 @@ function handleResponseProcessingError(
     );
 
 
-    if (
-      error.reason ===
-      "max_output_tokens"
-    ) {
-
-      return res
-        .status(
-          502
-        )
-        .json({
-          error:
-            "The AI response was cut off before it finished. Please try again.",
-        });
-
-    }
-
-
     return res
       .status(
         502
       )
       .json({
+
         error:
-          "The AI could not finish its response. Please try again.",
+          error.reason ===
+          "max_output_tokens"
+            ? "The AI response was cut off before it finished. Please try again."
+            : "The AI could not finish its response. Please try again.",
+
       });
 
   }
@@ -2255,10 +2519,8 @@ function handleResponseProcessingError(
     console.warn(
       "OpenAI response refusal",
       {
-
         responseId:
           error.responseId,
-
       }
     );
 
@@ -2343,18 +2605,6 @@ function handleResponseProcessingError(
   }
 
 
-  console.error(
-    "Unknown OpenAI response-processing error",
-    {
-      code:
-        error.code,
-
-      message:
-        error.message,
-    }
-  );
-
-
   return res
     .status(
       502
@@ -2366,10 +2616,6 @@ function handleResponseProcessingError(
 
 }
 
-
-// ---------------------------------------------------------
-// Actual OpenAI API error handling
-// ---------------------------------------------------------
 
 function handleOpenAIError(
   error,
@@ -2447,7 +2693,7 @@ function handleOpenAIError(
 
 
 // ---------------------------------------------------------
-// Basic routes
+// Routes
 // ---------------------------------------------------------
 
 app.get(
@@ -2473,19 +2719,20 @@ app.get(
       supportedLevels:
         Object.values(
           CEFR_LEVELS
-        ).map(
-          (
-            level
-          ) => ({
+        )
+          .map(
+            (
+              level
+            ) => ({
 
-            id:
-              level.id,
+              id:
+                level.id,
 
-            label:
-              level.label,
+              label:
+                level.label,
 
-          })
-        ),
+            })
+          ),
 
       scenarios: [
         ...Object.keys(
@@ -2546,10 +2793,6 @@ app.get(
   }
 );
 
-
-// ---------------------------------------------------------
-// Dictionary lookup
-// ---------------------------------------------------------
 
 app.get(
   "/api/word",
@@ -2612,10 +2855,12 @@ app.get(
     }
 
 
-    const rawWord =
-      String(
-        req.query.word ||
-        ""
+    const word =
+      cleanLookupWord(
+        String(
+          req.query.word ||
+          ""
+        )
       );
 
 
@@ -2625,12 +2870,6 @@ app.get(
         ""
       )
         .toLowerCase();
-
-
-    const word =
-      cleanLookupWord(
-        rawWord
-      );
 
 
     if (
@@ -2745,16 +2984,6 @@ app.get(
 );
 
 
-// ---------------------------------------------------------
-// Start conversation
-//
-// Preset:
-// zero OpenAI calls.
-//
-// Custom:
-// one OpenAI call.
-// ---------------------------------------------------------
-
 app.post(
   "/api/start",
   async (
@@ -2805,9 +3034,6 @@ app.post(
     }
 
 
-    // Preset opening:
-    // still zero AI usage.
-
     if (
       !setup.isCustom
     ) {
@@ -2837,6 +3063,7 @@ app.post(
     const input = [
 
       {
+
         role:
           "system",
 
@@ -2844,15 +3071,18 @@ app.post(
           buildCustomOpeningPrompt(
             setup
           ),
+
       },
 
 
       {
+
         role:
           "user",
 
         content:
           "APP META-INSTRUCTION: Begin the custom conversation now. This sentence is not learner dialogue.",
+
       },
 
     ];
@@ -2874,14 +3104,6 @@ app.post(
               effort:
                 "none",
             },
-
-            /*
-              Was 400.
-
-              The visible reply may be short,
-              but replyWords creates quite a
-              large JSON structure.
-            */
 
             max_output_tokens:
               MAX_CUSTOM_OPENING_TOKENS,
@@ -2975,10 +3197,6 @@ app.post(
   }
 );
 
-
-// ---------------------------------------------------------
-// Normal learner chat
-// ---------------------------------------------------------
 
 app.post(
   "/api/chat",
@@ -3094,6 +3312,7 @@ app.post(
     const input = [
 
       {
+
         role:
           "system",
 
@@ -3101,6 +3320,7 @@ app.post(
           buildSystemPrompt(
             setup
           ),
+
       },
 
 
@@ -3108,11 +3328,13 @@ app.post(
 
 
       {
+
         role:
           "user",
 
         content:
           message.trim(),
+
       },
 
     ];
@@ -3134,16 +3356,6 @@ app.post(
               effort:
                 "none",
             },
-
-            /*
-              Was 450.
-
-              This response contains:
-              reply
-              + replyWords
-              + feedback
-              + conversationEnded.
-            */
 
             max_output_tokens:
               MAX_CHAT_TOKENS,
@@ -3241,10 +3453,6 @@ app.post(
 );
 
 
-// ---------------------------------------------------------
-// Generate example response
-// ---------------------------------------------------------
-
 app.post(
   "/api/example",
   async (
@@ -3322,6 +3530,7 @@ app.post(
     const input = [
 
       {
+
         role:
           "system",
 
@@ -3329,6 +3538,7 @@ app.post(
           buildExampleSystemPrompt(
             setup
           ),
+
       },
 
 
@@ -3336,11 +3546,13 @@ app.post(
 
 
       {
+
         role:
           "user",
 
         content:
           "APP META-INSTRUCTION: Generate the example-response package now. This sentence is not learner dialogue and must not be included in the conversation.",
+
       },
 
     ];
@@ -3362,15 +3574,6 @@ app.post(
               effort:
                 "none",
             },
-
-            /*
-              Was 700.
-
-              This is the largest structured
-              response because it contains
-              two messages, a translation
-              and metadata for both messages.
-            */
 
             max_output_tokens:
               MAX_EXAMPLE_TOKENS,
@@ -3484,7 +3687,7 @@ app.post(
 
 
 // ---------------------------------------------------------
-// Invalid JSON / unexpected Express errors
+// Unexpected errors
 // ---------------------------------------------------------
 
 app.use(
@@ -3535,10 +3738,6 @@ app.use(
   }
 );
 
-
-// ---------------------------------------------------------
-// Start server
-// ---------------------------------------------------------
 
 app.listen(
   PORT,
