@@ -3,42 +3,38 @@ import {
   rm,
   stat,
   copyFile,
-  rename,
+  rename
 } from "node:fs/promises";
 
 import {
-  createReadStream,
+  createReadStream
 } from "node:fs";
 
 import {
   dirname,
-  resolve,
+  resolve
 } from "node:path";
 
 import {
-  Readable,
+  Readable
 } from "node:stream";
 
 import {
-  createGunzip,
+  createGunzip
 } from "node:zlib";
 
 import readline
   from "node:readline";
 
 import {
-  DatabaseSync,
+  DatabaseSync
 } from "node:sqlite";
 
 import {
   LANGUAGES,
-  getLanguage,
+  getLanguage
 } from "./languages.js";
 
-
-// ---------------------------------------------------------
-// BUILD SETTINGS
-// ---------------------------------------------------------
 
 const REQUESTED_LANGUAGE =
   process.env.DICTIONARY_LANGUAGE ||
@@ -61,20 +57,17 @@ const OUTPUT_PATH_OVERRIDE =
 
 
 /*
-  Render preserves XDG_CACHE_HOME
-  between builds.
+  v2 deliberately uses a new Render
+  cache folder.
 
-  We store our finished SQLite
-  dictionaries there.
-
-  If we ever change the database format
-  significantly, we can change v1 to v2
-  and Render will rebuild them.
+  That forces one clean rebuild because
+  meanings now contain structured
+  senses + usage tags.
 */
 
 const CACHE_VERSION =
   process.env.DICTIONARY_CACHE_VERSION ||
-  "v1";
+  "v2-sense-tags";
 
 
 const CACHE_ROOT =
@@ -90,19 +83,13 @@ const CACHE_ROOT =
       );
 
 
-/*
-  Set REBUILD_DICTIONARIES=1 in Render
-  only if we deliberately want to ignore
-  the cache and rebuild every dictionary.
-*/
-
 const FORCE_REBUILD =
   process.env.REBUILD_DICTIONARIES ===
   "1";
 
 
-const MAX_MEANINGS =
-  3;
+const MAX_SENSES =
+  5;
 
 
 const MAX_MEANING_LENGTH =
@@ -127,25 +114,113 @@ const NON_WORD_POS =
   ]);
 
 
+/*
+  Sense tags such as:
+
+  slang
+  vulgar
+  colloquial
+  dated
+  Spain
+  Mexico
+
+  are useful to learners.
+
+  But grammatical tags such as feminine,
+  plural or subjunctive would make the
+  meaning list unnecessarily cluttered.
+
+  We therefore remove grammatical tags
+  from the learner-facing sense labels.
+*/
+
+const HIDDEN_SENSE_TAGS =
+  new Set([
+
+    "form-of",
+
+    "masculine",
+    "feminine",
+    "neuter",
+    "common-gender",
+
+    "singular",
+    "plural",
+    "dual",
+
+    "countable",
+    "uncountable",
+
+    "first-person",
+    "second-person",
+    "third-person",
+
+    "present",
+    "past",
+    "future",
+    "preterite",
+    "imperfect",
+    "perfect",
+    "pluperfect",
+
+    "imperative",
+    "indicative",
+    "subjunctive",
+    "conditional",
+
+    "infinitive",
+    "participle",
+    "gerund",
+
+    "comparative",
+    "superlative",
+    "positive",
+
+    "attributive",
+    "predicative",
+
+    "definite",
+    "indefinite",
+
+    "nominative",
+    "accusative",
+    "dative",
+    "genitive",
+    "vocative",
+    "instrumental",
+    "locative",
+    "ablative",
+
+    "animate",
+    "inanimate",
+
+  ]);
+
+
 // ---------------------------------------------------------
-// NORMALISATION
+// Helpers
 // ---------------------------------------------------------
 
 function normalizeWord(
   value,
   locale
 ) {
+
   return value
-    .normalize("NFC")
+    .normalize(
+      "NFC"
+    )
     .toLocaleLowerCase(
       locale
     );
+
 }
 
 
 function cleanText(
   value
 ) {
+
   return String(
     value
   )
@@ -158,30 +233,78 @@ function cleanText(
       0,
       MAX_MEANING_LENGTH
     );
+
 }
 
 
 function uniqueStrings(
   values
 ) {
+
   return [
     ...new Set(
       values.filter(
         Boolean
       )
-    ),
+    )
   ];
+
+}
+
+
+function cleanSenseTags(
+  tags
+) {
+
+  return uniqueStrings(
+
+    (
+      Array.isArray(
+        tags
+      )
+        ? tags
+        : []
+    )
+      .filter(
+        (
+          tag
+        ) =>
+          typeof tag ===
+          "string"
+      )
+      .map(
+        (
+          tag
+        ) =>
+          tag.trim()
+      )
+      .filter(
+        (
+          tag
+        ) =>
+          tag &&
+          !HIDDEN_SENSE_TAGS.has(
+            tag
+          )
+      )
+
+  ).slice(
+    0,
+    8
+  );
+
 }
 
 
 // ---------------------------------------------------------
-// REDUCE ONE WIKTIONARY ENTRY
+// Reduce dictionary entry
 // ---------------------------------------------------------
 
 function extractLeanEntry(
   entry,
   language
 ) {
+
   if (
     !entry ||
     entry.lang_code !==
@@ -189,13 +312,17 @@ function extractLeanEntry(
     typeof entry.word !==
       "string"
   ) {
+
     return null;
+
   }
 
 
   const word =
     entry.word
-      .normalize("NFC")
+      .normalize(
+        "NFC"
+      )
       .trim();
 
 
@@ -204,9 +331,12 @@ function extractLeanEntry(
     /\s/u.test(
       word
     ) ||
-    word.length > 80
+    word.length >
+      80
   ) {
+
     return null;
+
   }
 
 
@@ -222,12 +352,18 @@ function extractLeanEntry(
       pos
     )
   ) {
+
     return null;
+
   }
 
 
-  const meanings =
+  const senses =
     [];
+
+
+  const senseKeys =
+    new Set();
 
 
   const lemmas =
@@ -246,6 +382,7 @@ function extractLeanEntry(
       ? entry.senses
       : []
   ) {
+
     const formOf =
       Array.isArray(
         sense?.form_of
@@ -255,7 +392,8 @@ function extractLeanEntry(
 
 
     const isFormSense =
-      formOf.length > 0 ||
+      formOf.length >
+        0 ||
       sense?.tags?.includes(
         "form-of"
       );
@@ -264,21 +402,28 @@ function extractLeanEntry(
     if (
       isFormSense
     ) {
+
       for (
         const relation
         of formOf
       ) {
+
         if (
           typeof relation?.word ===
             "string" &&
           relation.word.trim()
         ) {
+
           lemmas.push(
             relation.word
-              .normalize("NFC")
+              .normalize(
+                "NFC"
+              )
               .trim()
           );
+
         }
+
       }
 
 
@@ -290,57 +435,104 @@ function extractLeanEntry(
           ? sense.tags
           : []
       ) {
+
         if (
           tag !==
             "form-of" &&
           typeof tag ===
             "string"
         ) {
+
           grammarTags.push(
             tag
           );
+
         }
+
       }
 
 
       continue;
+
     }
 
 
     if (
-      Array.isArray(
+      !Array.isArray(
         sense?.glosses
-      ) &&
-      sense.glosses.length >
+      ) ||
+      sense.glosses.length ===
         0
     ) {
-      const gloss =
-        cleanText(
-          sense.glosses[
-            sense.glosses.length -
-            1
-          ]
-        );
 
+      continue;
 
-      if (
-        gloss
-      ) {
-        meanings.push(
-          gloss
-        );
-      }
     }
-  }
 
 
-  const uniqueMeanings =
-    uniqueStrings(
-      meanings
-    ).slice(
-      0,
-      MAX_MEANINGS
+    const meaning =
+      cleanText(
+        sense.glosses[
+          sense.glosses.length -
+          1
+        ]
+      );
+
+
+    if (
+      !meaning
+    ) {
+
+      continue;
+
+    }
+
+
+    const tags =
+      cleanSenseTags(
+        sense.tags
+      );
+
+
+    const key =
+      `${meaning}\u0000${tags.join("|")}`;
+
+
+    if (
+      senseKeys.has(
+        key
+      )
+    ) {
+
+      continue;
+
+    }
+
+
+    senseKeys.add(
+      key
     );
+
+
+    senses.push({
+
+      meaning,
+
+      tags,
+
+    });
+
+
+    if (
+      senses.length >=
+      MAX_SENSES
+    ) {
+
+      break;
+
+    }
+
+  }
 
 
   const uniqueLemmas =
@@ -362,16 +554,19 @@ function extractLeanEntry(
 
 
   if (
-    uniqueMeanings.length ===
+    senses.length ===
       0 &&
     uniqueLemmas.length ===
       0
   ) {
+
     return null;
+
   }
 
 
   return {
+
     word,
 
     normalized:
@@ -382,20 +577,21 @@ function extractLeanEntry(
 
     pos,
 
-    meanings:
-      uniqueMeanings,
+    senses,
 
     lemmas:
       uniqueLemmas,
 
     grammar:
       uniqueGrammarTags,
+
   };
+
 }
 
 
 // ---------------------------------------------------------
-// EXPAND INFLECTED FORMS
+// Inflected forms
 // ---------------------------------------------------------
 
 function extractInflectedForms(
@@ -403,15 +599,18 @@ function extractInflectedForms(
   lemmaEntry,
   language
 ) {
+
   if (
     !lemmaEntry ||
-    lemmaEntry.meanings.length ===
+    lemmaEntry.senses.length ===
       0 ||
     !Array.isArray(
       rawEntry?.forms
     )
   ) {
+
     return [];
+
   }
 
 
@@ -427,47 +626,61 @@ function extractInflectedForms(
     const formEntry
     of rawEntry.forms
   ) {
+
     if (
       typeof formEntry?.form !==
         "string"
     ) {
+
       continue;
+
     }
 
 
     const form =
       formEntry.form
-        .normalize("NFC")
+        .normalize(
+          "NFC"
+        )
         .trim();
 
 
     if (
       !form ||
-      form === "-" ||
+      form ===
+        "-" ||
       form ===
         lemmaEntry.word ||
       /\s/u.test(
         form
       ) ||
-      form.length > 80
+      form.length >
+        80
     ) {
+
       continue;
+
     }
 
 
     const grammar =
       uniqueStrings(
+
         (
           Array.isArray(
             formEntry.tags
           )
             ? formEntry.tags
             : []
-        ).filter(
-          (tag) =>
-            typeof tag ===
-            "string"
         )
+          .filter(
+            (
+              tag
+            ) =>
+              typeof tag ===
+              "string"
+          )
+
       ).slice(
         0,
         16
@@ -486,7 +699,9 @@ function extractInflectedForms(
         key
       )
     ) {
+
       continue;
+
     }
 
 
@@ -496,6 +711,7 @@ function extractInflectedForms(
 
 
     results.push({
+
       word:
         form,
 
@@ -508,7 +724,7 @@ function extractInflectedForms(
       pos:
         lemmaEntry.pos,
 
-      meanings:
+      senses:
         [],
 
       lemmas: [
@@ -516,37 +732,45 @@ function extractInflectedForms(
       ],
 
       grammar,
+
     });
+
   }
 
 
   return results;
+
 }
 
 
 // ---------------------------------------------------------
-// WHICH LANGUAGES SHOULD WE BUILD?
+// Build targets
 // ---------------------------------------------------------
 
 function resolveBuildTargets() {
+
   if (
     REQUESTED_LANGUAGE ===
-      "all"
+    "all"
   ) {
+
     if (
       SOURCE_URL_OVERRIDE ||
       SOURCE_FILE_OVERRIDE ||
       OUTPUT_PATH_OVERRIDE
     ) {
+
       throw new Error(
         "Dictionary source/output overrides can only be used when DICTIONARY_LANGUAGE names one specific language."
       );
+
     }
 
 
     return Object.values(
       LANGUAGES
     );
+
   }
 
 
@@ -559,35 +783,35 @@ function resolveBuildTargets() {
   if (
     !language
   ) {
+
     throw new Error(
       `Unknown DICTIONARY_LANGUAGE '${REQUESTED_LANGUAGE}'. Supported: ${Object.keys(
         LANGUAGES
       ).join(", ")}, all.`
     );
+
   }
 
 
   return [
     language
   ];
+
 }
 
 
 // ---------------------------------------------------------
-// GET KAIKKI SOURCE STREAM
-//
-// Supports both:
-//
-// .jsonl
-// .jsonl.gz
+// Source stream
 // ---------------------------------------------------------
 
 async function getSourceStream(
   language
 ) {
+
   if (
     SOURCE_FILE_OVERRIDE
   ) {
+
     console.log(
       `Reading ${language.name} dictionary source from ${SOURCE_FILE_OVERRIDE}`
     );
@@ -608,6 +832,7 @@ async function getSourceStream(
 
 
     return {
+
       stream:
         isCompressed
           ? fileStream.pipe(
@@ -616,6 +841,7 @@ async function getSourceStream(
           : fileStream,
 
       metadata: {
+
         source:
           SOURCE_FILE_OVERRIDE,
 
@@ -624,8 +850,11 @@ async function getSourceStream(
 
         lastModified:
           "",
+
       },
+
     };
+
   }
 
 
@@ -645,10 +874,14 @@ async function getSourceStream(
     await fetch(
       sourceUrl,
       {
+
         headers: {
+
           "User-Agent":
             "AI-Language-Learning-MVP/1.0 (dictionary build)",
+
         },
+
       }
     );
 
@@ -657,9 +890,11 @@ async function getSourceStream(
     !response.ok ||
     !response.body
   ) {
+
     throw new Error(
       `${language.name} dictionary download failed with HTTP ${response.status}`
     );
+
   }
 
 
@@ -682,6 +917,7 @@ async function getSourceStream(
 
 
   return {
+
     stream:
       isCompressed
         ? downloadedStream.pipe(
@@ -690,32 +926,40 @@ async function getSourceStream(
         : downloadedStream,
 
     metadata: {
+
       source:
         sourceUrl,
 
       etag:
         response.headers.get(
           "etag"
-        ) || "",
+        ) ||
+        "",
 
       lastModified:
         response.headers.get(
           "last-modified"
-        ) || "",
+        ) ||
+        "",
+
     },
+
   };
+
 }
 
 
 // ---------------------------------------------------------
-// CHECK A CACHED SQLITE DICTIONARY
+// Cache validation
 // ---------------------------------------------------------
 
 async function cachedDictionaryIsValid(
   cachePath,
   language
 ) {
+
   try {
+
     const fileStats =
       await stat(
         cachePath
@@ -726,7 +970,9 @@ async function cachedDictionaryIsValid(
       fileStats.size <
       10000
     ) {
+
       return false;
+
     }
 
 
@@ -740,41 +986,54 @@ async function cachedDictionaryIsValid(
       );
 
 
-    const statement =
+    const languageRow =
       db.prepare(`
         SELECT value
         FROM metadata
         WHERE key = 'language_id'
         LIMIT 1
-      `);
+      `)
+        .get();
 
 
-    const row =
-      statement.get();
+    const formatRow =
+      db.prepare(`
+        SELECT value
+        FROM metadata
+        WHERE key = 'dictionary_format'
+        LIMIT 1
+      `)
+        .get();
 
 
     db.close();
 
 
     return (
-      row?.value ===
-      language.id
+      languageRow?.value ===
+        language.id &&
+      formatRow?.value ===
+        "sense-tags-v2"
     );
 
   } catch {
+
     return false;
+
   }
+
 }
 
 
 // ---------------------------------------------------------
-// BUILD ONE SQLITE DATABASE
+// Build one dictionary
 // ---------------------------------------------------------
 
 async function buildDictionary(
   language,
   outputPath
 ) {
+
   await mkdir(
     dirname(
       outputPath
@@ -867,10 +1126,12 @@ async function buildDictionary(
 
 
   const {
+
     stream:
       source,
 
     metadata,
+
   } =
     await getSourceStream(
       language
@@ -879,11 +1140,13 @@ async function buildDictionary(
 
   const lines =
     readline.createInterface({
+
       input:
         source,
 
       crlfDelay:
         Infinity,
+
     });
 
 
@@ -913,10 +1176,12 @@ async function buildDictionary(
 
 
   try {
+
     for await (
       const line
       of lines
     ) {
+
       sourceLines +=
         1;
 
@@ -924,7 +1189,9 @@ async function buildDictionary(
       if (
         !line.trim()
       ) {
+
         continue;
+
       }
 
 
@@ -932,16 +1199,20 @@ async function buildDictionary(
 
 
       try {
+
         rawEntry =
           JSON.parse(
             line
           );
 
       } catch {
+
         skippedEntries +=
           1;
 
+
         continue;
+
       }
 
 
@@ -955,14 +1226,18 @@ async function buildDictionary(
       if (
         !entry
       ) {
+
         skippedEntries +=
           1;
 
+
         continue;
+
       }
 
 
       const entriesToInsert = [
+
         entry,
 
         ...extractInflectedForms(
@@ -970,6 +1245,7 @@ async function buildDictionary(
           entry,
           language
         ),
+
       ];
 
 
@@ -977,16 +1253,18 @@ async function buildDictionary(
         const item
         of entriesToInsert
       ) {
+
         insertLexicon.run(
+
           item.word,
 
           item.normalized,
 
           item.pos,
 
-          item.meanings.length
+          item.senses.length
             ? JSON.stringify(
-                item.meanings
+                item.senses
               )
             : null,
 
@@ -1001,6 +1279,7 @@ async function buildDictionary(
                 item.grammar
               )
             : null
+
         );
 
 
@@ -1016,8 +1295,10 @@ async function buildDictionary(
           item !==
           entry
         ) {
+
           generatedInflectedForms +=
             1;
+
         }
 
 
@@ -1025,6 +1306,7 @@ async function buildDictionary(
           transactionCount >=
           COMMIT_EVERY
         ) {
+
           db.exec(
             "COMMIT; BEGIN"
           );
@@ -1037,8 +1319,11 @@ async function buildDictionary(
           console.log(
             `${language.name}: indexed ${keptEntries.toLocaleString()} entries...`
           );
+
         }
+
       }
+
     }
 
 
@@ -1058,6 +1343,12 @@ async function buildDictionary(
 
       ANALYZE;
     `);
+
+
+    insertMetadata.run(
+      "dictionary_format",
+      "sense-tags-v2"
+    );
 
 
     insertMetadata.run(
@@ -1144,7 +1435,7 @@ async function buildDictionary(
 
     insertMetadata.run(
       "modifications",
-      "Reduced to single-token lexical entries with word, normalized lookup key, part of speech, up to three English glosses, form-of lemma links, selected grammatical tags, and inflected forms expanded from Wiktextract conjugation/declension tables."
+      "Reduced to single-token lexical entries. Meanings are stored as individual English senses with learner-useful Wiktextract sense tags; grammatical-only sense tags are omitted from the display list. Form-of lemma links, grammatical form tags, and inflected forms are retained."
     );
 
 
@@ -1194,13 +1485,17 @@ async function buildDictionary(
   } catch (
     error
   ) {
+
     try {
+
       db.exec(
         "ROLLBACK"
       );
 
     } catch {
+
       // Ignore rollback failure.
+
     }
 
 
@@ -1217,17 +1512,20 @@ async function buildDictionary(
 
 
     throw error;
+
   }
+
 }
 
 
 // ---------------------------------------------------------
-// RESTORE FROM CACHE OR BUILD
+// Restore/build dictionary
 // ---------------------------------------------------------
 
 async function prepareDictionary(
   language
 ) {
+
   const outputPath =
     resolve(
       OUTPUT_PATH_OVERRIDE ||
@@ -1264,12 +1562,6 @@ async function prepareDictionary(
   );
 
 
-  /*
-    If Render already has a valid cached
-    dictionary, simply copy it into the
-    current deployment.
-  */
-
   if (
     !FORCE_REBUILD &&
     await cachedDictionaryIsValid(
@@ -1277,6 +1569,7 @@ async function prepareDictionary(
       language
     )
   ) {
+
     console.log(
       `${language.name}: restoring dictionary from build cache.`
     );
@@ -1300,17 +1593,12 @@ async function prepareDictionary(
 
 
     return;
+
   }
 
 
-  /*
-    No usable cache exists.
-
-    Download Kaikki and build it once.
-  */
-
   console.log(
-    `${language.name}: no usable cached dictionary found. Building now.`
+    `${language.name}: no usable v2 cached dictionary found. Building now.`
   );
 
 
@@ -1319,15 +1607,6 @@ async function prepareDictionary(
     outputPath
   );
 
-
-  /*
-    Save completed DB into Render's
-    build cache.
-
-    Write to a temporary cache file
-    first, so a failed copy never leaves
-    a corrupt file that looks valid.
-  */
 
   const temporaryCachePath =
     `${cachePath}.tmp`;
@@ -1366,14 +1645,16 @@ async function prepareDictionary(
   console.log(
     `${language.name}: saved completed dictionary to Render build cache.`
   );
+
 }
 
 
 // ---------------------------------------------------------
-// MAIN
+// Main
 // ---------------------------------------------------------
 
 async function main() {
+
   const targets =
     resolveBuildTargets();
 
@@ -1392,8 +1673,9 @@ async function main() {
     const language
     of targets
   ) {
+
     console.log(
-      `\n========================================`
+      "\n========================================"
     );
 
 
@@ -1403,24 +1685,29 @@ async function main() {
 
 
     console.log(
-      `========================================`
+      "========================================"
     );
 
 
     await prepareDictionary(
       language
     );
+
   }
 
 
   console.log(
     "\nAll configured dictionaries are ready."
   );
+
 }
 
 
 main().catch(
-  (error) => {
+  (
+    error
+  ) => {
+
     console.error(
       "Dictionary build failed:",
       error.message
@@ -1430,5 +1717,6 @@ main().catch(
     process.exit(
       1
     );
+
   }
 );
