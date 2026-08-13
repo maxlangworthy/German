@@ -1,42 +1,64 @@
-# German dictionary data: attribution and licence
+# Dictionary data: attribution and licence
 
-The German word-lookup feature uses data derived from the English-language edition of Wiktionary and extracted/processed by Wiktextract / Kaikki.org.
+The word-lookup feature uses dictionary data derived from the English-language edition of Wiktionary and extracted/processed by Wiktextract / Kaikki.org.
 
-## Source
+## Languages currently using local dictionary data
+
+- German (`de`)
+- Italian (`it`)
+- Spanish (`es`)
+- Afrikaans (`af`)
+- French (`fr`)
+- Russian (`ru`)
+- Arabic (`ar`)
+- Turkish (`tr`)
+- Greek (`el`)
+
+Mandarin Chinese (Pinyin) and Japanese (Romaji) currently do not use the local Kaikki dictionary lookup feature.
+
+## Sources
 
 - English Wiktionary contributors: https://en.wiktionary.org/
-- Kaikki.org German machine-readable dictionary: https://kaikki.org/dictionary/German/
-- Build source used by this project: https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl.gz
-- Wiktextract project: https://github.com/tatuylonen/wiktextract
+- Wiktextract: https://github.com/tatuylonen/wiktextract
+- Kaikki.org machine-readable dictionaries: https://kaikki.org/dictionary/
+- German: https://kaikki.org/dictionary/German/
+- Italian: https://kaikki.org/dictionary/Italian/
+- Spanish: https://kaikki.org/dictionary/Spanish/
+- Afrikaans: https://kaikki.org/dictionary/Afrikaans/
+- French: https://kaikki.org/dictionary/French/
+- Russian: https://kaikki.org/dictionary/Russian/
+- Arabic: https://kaikki.org/dictionary/Arabic/
+- Turkish: https://kaikki.org/dictionary/Turkish/
+- Greek: https://kaikki.org/dictionary/Greek/
 
-The build script downloads the current Kaikki German export at deployment time, so the exact upstream dump date can change between deployments. Kaikki publishes the dump/extraction vintage on its German dictionary page.
+The build script downloads the configured Kaikki exports at deployment time, so the exact upstream extraction/dump date can change between deployments.
 
 ## Modifications made by this project
 
-The source data is transformed into a reduced SQLite lookup database for language-learning word tooltips. The transformation:
+The source data is transformed into reduced SQLite lookup databases for language-learning word tooltips. Depending on the source entry, the transformation can:
 
-- keeps German (`de`) entries only;
-- keeps single-token lexical entries suitable for per-word lookup;
-- removes non-word items such as punctuation, symbols, prefixes and suffixes;
-- keeps the surface word and part of speech;
-- keeps up to three English glosses per lexical entry;
-- keeps `form_of` lemma links for inflected forms;
-- expands additional conjugated/declined single-word forms from Wiktextract `forms` tables and links them back to their lemma;
-- keeps a limited set of grammatical tags for inflected forms;
-- discards material not needed by the MVP, including audio, etymology, quotations, categories, links, examples and most other metadata;
-- normalises an additional lower-case lookup key for efficient matching.
+- keep entries for the configured target language only;
+- keep single-token lexical entries suitable for per-word lookup;
+- remove non-word items such as punctuation, symbols, prefixes and suffixes;
+- keep the surface word and part of speech;
+- keep a limited number of English glosses/senses and selected sense tags;
+- keep `form_of` lemma links for inflected forms;
+- expand additional conjugated/declined single-word forms from Wiktextract `forms` tables and link them back to their lemma;
+- keep a limited set of grammatical tags for inflected forms;
+- discard material not needed by the app, including audio, etymology, quotations, categories, links, examples and most other metadata;
+- normalise an additional lower-case lookup key for efficient matching.
 
-This reduced database is therefore a modified/adapted form of the source dictionary data.
+The generated SQLite databases are therefore modified/adapted forms of the source dictionary data.
 
 ## Licence
 
-Kaikki.org states that its extracted data is made available under the same licences as Wiktionary: Creative Commons Attribution-ShareAlike and the GNU Free Documentation License (GFDL). The current English Wiktionary copyright page identifies its text licence as Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), alongside the GFDL.
+Kaikki.org states that its extracted data is made available under the same licences as Wiktionary. The English Wiktionary copyright information identifies its text licensing, including Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), alongside GFDL terms where applicable.
 
-For this project, the reduced dictionary data and dictionary-derived outputs are provided under **CC BY-SA 4.0**. This notice does not apply that licence to the application's independently written source code, interface, branding, prompts or other original material unless explicitly stated.
+For this project, dictionary-derived data and dictionary-derived outputs are provided under **CC BY-SA 4.0**. This notice does not apply that licence to the application's independently written source code, interface, branding, prompts or other original material unless explicitly stated.
 
 - CC BY-SA 4.0: https://creativecommons.org/licenses/by-sa/4.0/
 - Wiktionary copyright information: https://en.wiktionary.org/wiki/Wiktionary:Copyrights
-- Kaikki.org licence statement: https://kaikki.org/dictionary/
+- Kaikki.org licence information: https://kaikki.org/dictionary/
 
 Attribution must not imply that Wiktionary contributors, Wikimedia, Wiktextract or Kaikki.org endorse this application.
 
