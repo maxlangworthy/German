@@ -74,6 +74,43 @@ export const LANGUAGES = {
     },
   },
 
+  portuguese: {
+    id: "portuguese",
+    name: "Portuguese",
+    locale: "pt-PT",
+    aiLanguageName: "Portuguese",
+    direction: "ltr",
+    specialCharacters: [
+      "á",
+      "à",
+      "â",
+      "ã",
+      "ç",
+      "é",
+      "ê",
+      "í",
+      "ó",
+      "ô",
+      "õ",
+      "ú",
+    ],
+    wiktionaryLanguageCode: "pt",
+    dictionary: {
+      sourceUrl:
+        "https://kaikki.org/dictionary/Portuguese/kaikki.org-dictionary-Portuguese.jsonl",
+      compressed: false,
+      path: "data/portuguese.sqlite",
+    },
+    openings: {
+      coffee:
+        "Bom dia! O que gostaria de pedir?",
+      weekend:
+        "Olá! Como foi o seu fim de semana?",
+      directions:
+        "Desculpe, pode dizer-me como chegar à estação?",
+    },
+  },
+
   afrikaans: {
     id: "afrikaans",
     name: "Afrikaans",
