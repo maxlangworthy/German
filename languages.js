@@ -4,12 +4,20 @@ export const LANGUAGES = {
     name: "German",
     locale: "de-DE",
     aiLanguageName: "German",
+    direction: "ltr",
+    specialCharacters: ["ä", "ö", "ü", "ß"],
     wiktionaryLanguageCode: "de",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl",
       compressed: false,
       path: "data/german.sqlite",
+    },
+    openings: {
+      coffee: "Guten Tag! Was möchten Sie bestellen?",
+      weekend: "Hallo! Wie war dein Wochenende?",
+      directions:
+        "Entschuldigung, können Sie mir sagen, wie ich zum Bahnhof komme?",
     },
   },
 
@@ -18,12 +26,19 @@ export const LANGUAGES = {
     name: "Italian",
     locale: "it-IT",
     aiLanguageName: "Italian",
+    direction: "ltr",
+    specialCharacters: ["à", "è", "é", "ì", "ò", "ù"],
     wiktionaryLanguageCode: "it",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Italian/kaikki.org-dictionary-Italian.jsonl",
       compressed: false,
       path: "data/italian.sqlite",
+    },
+    openings: {
+      coffee: "Buongiorno! Cosa desidera ordinare?",
+      weekend: "Ciao! Com'è andato il tuo fine settimana?",
+      directions: "Mi scusi, può dirmi come si arriva alla stazione?",
     },
   },
 
@@ -32,12 +47,30 @@ export const LANGUAGES = {
     name: "Spanish",
     locale: "es-ES",
     aiLanguageName: "Spanish",
+    direction: "ltr",
+    specialCharacters: [
+      "á",
+      "é",
+      "í",
+      "ó",
+      "ú",
+      "ü",
+      "ñ",
+      "¿",
+      "¡",
+    ],
     wiktionaryLanguageCode: "es",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Spanish/kaikki.org-dictionary-Spanish.jsonl",
       compressed: false,
       path: "data/spanish.sqlite",
+    },
+    openings: {
+      coffee: "¡Buenos días! ¿Qué desea pedir?",
+      weekend: "¡Hola! ¿Qué tal tu fin de semana?",
+      directions:
+        "Disculpe, ¿puede decirme cómo llegar a la estación?",
     },
   },
 
@@ -46,12 +79,20 @@ export const LANGUAGES = {
     name: "Afrikaans",
     locale: "af-ZA",
     aiLanguageName: "Afrikaans",
+    direction: "ltr",
+    specialCharacters: ["ê", "ë", "ï", "ô", "û"],
     wiktionaryLanguageCode: "af",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Afrikaans/kaikki.org-dictionary-Afrikaans.jsonl",
       compressed: false,
       path: "data/afrikaans.sqlite",
+    },
+    openings: {
+      coffee: "Goeiedag! Wat wil u bestel?",
+      weekend: "Hallo! Hoe was jou naweek?",
+      directions:
+        "Verskoon my, kan u my sê hoe ek by die stasie kom?",
     },
   },
 
@@ -60,12 +101,37 @@ export const LANGUAGES = {
     name: "French",
     locale: "fr-FR",
     aiLanguageName: "French",
+    direction: "ltr",
+    specialCharacters: [
+      "à",
+      "â",
+      "æ",
+      "ç",
+      "é",
+      "è",
+      "ê",
+      "ë",
+      "î",
+      "ï",
+      "ô",
+      "œ",
+      "ù",
+      "û",
+      "ü",
+      "ÿ",
+    ],
     wiktionaryLanguageCode: "fr",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/French/kaikki.org-dictionary-French.jsonl",
       compressed: false,
       path: "data/french.sqlite",
+    },
+    openings: {
+      coffee: "Bonjour ! Que souhaitez-vous commander ?",
+      weekend: "Salut ! Comment s'est passé ton week-end ?",
+      directions:
+        "Excusez-moi, pouvez-vous me dire comment aller à la gare ?",
     },
   },
 
@@ -74,12 +140,56 @@ export const LANGUAGES = {
     name: "Russian",
     locale: "ru-RU",
     aiLanguageName: "Russian",
+    direction: "ltr",
+    specialCharacters: [
+      "а",
+      "б",
+      "в",
+      "г",
+      "д",
+      "е",
+      "ё",
+      "ж",
+      "з",
+      "и",
+      "й",
+      "к",
+      "л",
+      "м",
+      "н",
+      "о",
+      "п",
+      "р",
+      "с",
+      "т",
+      "у",
+      "ф",
+      "х",
+      "ц",
+      "ч",
+      "ш",
+      "щ",
+      "ъ",
+      "ы",
+      "ь",
+      "э",
+      "ю",
+      "я",
+    ],
     wiktionaryLanguageCode: "ru",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Russian/kaikki.org-dictionary-Russian.jsonl",
       compressed: false,
       path: "data/russian.sqlite",
+    },
+    openings: {
+      coffee:
+        "Здравствуйте! Что вы хотели бы заказать?",
+      weekend:
+        "Привет! Как прошли твои выходные?",
+      directions:
+        "Извините, вы не подскажете, как пройти к вокзалу?",
     },
   },
 
@@ -88,12 +198,59 @@ export const LANGUAGES = {
     name: "Arabic",
     locale: "ar",
     aiLanguageName: "Arabic",
+    direction: "rtl",
+    specialCharacters: [
+      "ا",
+      "ب",
+      "ت",
+      "ث",
+      "ج",
+      "ح",
+      "خ",
+      "د",
+      "ذ",
+      "ر",
+      "ز",
+      "س",
+      "ش",
+      "ص",
+      "ض",
+      "ط",
+      "ظ",
+      "ع",
+      "غ",
+      "ف",
+      "ق",
+      "ك",
+      "ل",
+      "م",
+      "ن",
+      "ه",
+      "و",
+      "ي",
+      "ء",
+      "أ",
+      "إ",
+      "آ",
+      "ؤ",
+      "ئ",
+      "ة",
+      "ى",
+    ],
     wiktionaryLanguageCode: "ar",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Arabic/kaikki.org-dictionary-Arabic.jsonl",
       compressed: false,
       path: "data/arabic.sqlite",
+    },
+    openings: {
+      coffee:
+        "مرحبًا! ماذا تود أن تطلب؟",
+      weekend:
+        "مرحبًا! كيف كانت عطلة نهاية الأسبوع؟",
+      directions:
+        "عذرًا، هل يمكنك أن تخبرني كيف أصل إلى محطة القطار؟",
     },
     outputInstructions: `
 - Write all target-language dialogue in clear, natural Modern Standard Arabic unless the scenario specifically requires another variety.
@@ -107,12 +264,30 @@ export const LANGUAGES = {
     name: "Turkish",
     locale: "tr-TR",
     aiLanguageName: "Turkish",
+    direction: "ltr",
+    specialCharacters: [
+      "ç",
+      "ğ",
+      "ı",
+      "İ",
+      "ö",
+      "ş",
+      "ü",
+    ],
     wiktionaryLanguageCode: "tr",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Turkish/kaikki.org-dictionary-Turkish.jsonl",
       compressed: false,
       path: "data/turkish.sqlite",
+    },
+    openings: {
+      coffee:
+        "Merhaba! Ne sipariş etmek istersiniz?",
+      weekend:
+        "Merhaba! Hafta sonun nasıldı?",
+      directions:
+        "Affedersiniz, tren istasyonuna nasıl gidebileceğimi söyleyebilir misiniz?",
     },
   },
 
@@ -121,12 +296,59 @@ export const LANGUAGES = {
     name: "Greek",
     locale: "el-GR",
     aiLanguageName: "Modern Greek",
+    direction: "ltr",
+    specialCharacters: [
+      "α",
+      "β",
+      "γ",
+      "δ",
+      "ε",
+      "ζ",
+      "η",
+      "θ",
+      "ι",
+      "κ",
+      "λ",
+      "μ",
+      "ν",
+      "ξ",
+      "ο",
+      "π",
+      "ρ",
+      "σ",
+      "ς",
+      "τ",
+      "υ",
+      "φ",
+      "χ",
+      "ψ",
+      "ω",
+      "ά",
+      "έ",
+      "ή",
+      "ί",
+      "ό",
+      "ύ",
+      "ώ",
+      "ϊ",
+      "ΐ",
+      "ϋ",
+      "ΰ",
+    ],
     wiktionaryLanguageCode: "el",
     dictionary: {
       sourceUrl:
         "https://kaikki.org/dictionary/Greek/kaikki.org-dictionary-Greek.jsonl",
       compressed: false,
       path: "data/greek.sqlite",
+    },
+    openings: {
+      coffee:
+        "Γεια σας! Τι θα θέλατε να παραγγείλετε;",
+      weekend:
+        "Γεια! Πώς ήταν το Σαββατοκύριακό σου;",
+      directions:
+        "Συγγνώμη, μπορείτε να μου πείτε πώς θα πάω στον σταθμό;",
     },
     outputInstructions: `
 - Write all target-language dialogue in natural Modern Greek.
@@ -140,8 +362,44 @@ export const LANGUAGES = {
     name: "Mandarin Chinese (Pinyin)",
     locale: "zh-CN",
     aiLanguageName: "Mandarin Chinese",
+    direction: "ltr",
+    specialCharacters: [
+      "ā",
+      "á",
+      "ǎ",
+      "à",
+      "ē",
+      "é",
+      "ě",
+      "è",
+      "ī",
+      "í",
+      "ǐ",
+      "ì",
+      "ō",
+      "ó",
+      "ǒ",
+      "ò",
+      "ū",
+      "ú",
+      "ǔ",
+      "ù",
+      "ǖ",
+      "ǘ",
+      "ǚ",
+      "ǜ",
+      "ü",
+    ],
     wiktionaryLanguageCode: null,
     dictionary: null,
+    openings: {
+      coffee:
+        "Nǐ hǎo! Nǐ xiǎng diǎn shénme?",
+      weekend:
+        "Nǐ hǎo! Nǐ zhōumò guò de zěnmeyàng?",
+      directions:
+        "Bù hǎoyìsi, qǐngwèn huǒchēzhàn zěnme zǒu?",
+    },
     outputInstructions: `
 - Write all target-language dialogue in standard Hanyu Pinyin using Latin letters.
 - Use tone marks on vowels, for example: nǐ hǎo, xiǎng, kāfēi.
@@ -155,8 +413,24 @@ export const LANGUAGES = {
     name: "Japanese (Romaji)",
     locale: "ja-JP",
     aiLanguageName: "Japanese",
+    direction: "ltr",
+    specialCharacters: [
+      "ā",
+      "ī",
+      "ū",
+      "ē",
+      "ō",
+    ],
     wiktionaryLanguageCode: null,
     dictionary: null,
+    openings: {
+      coffee:
+        "Konnichiwa! Nani o chūmon shimasu ka?",
+      weekend:
+        "Konnichiwa! Shūmatsu wa dō deshita ka?",
+      directions:
+        "Sumimasen, eki made dō yatte ikeba ii desu ka?",
+    },
     outputInstructions: `
 - Write all target-language dialogue in Hepburn-style rōmaji using Latin letters.
 - Do not use hiragana, katakana or kanji anywhere in the target-language dialogue.
