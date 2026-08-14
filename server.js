@@ -117,6 +117,309 @@ const openai =
 
 
 // ---------------------------------------------------------
+// Supabase authentication
+// ---------------------------------------------------------
+
+
+const SUPABASE_URL =
+  String(
+    process.env.SUPABASE_URL ||
+    ""
+  )
+    .trim()
+    .replace(
+      /\/+$/,
+      ""
+    );
+
+
+const SUPABASE_PUBLISHABLE_KEY =
+  String(
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    ""
+  ).trim();
+
+
+const SUPABASE_AUTH_CONFIGURED =
+  Boolean(
+    SUPABASE_URL &&
+    SUPABASE_PUBLISHABLE_KEY
+  );
+
+
+if (
+  !SUPABASE_AUTH_CONFIGURED
+) {
+
+  console.warn(
+    "Supabase authentication is not configured. /api/me will be unavailable until SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are set."
+  );
+
+}
+
+
+function getAuthorizationHeader(
+  req
+) {
+
+  const value =
+    req.get(
+      "authorization"
+    );
+
+
+  return typeof value ===
+    "string"
+      ? value.trim()
+      : "";
+
+}
+
+
+function getBearerToken(
+  authorizationHeader
+) {
+
+  const match =
+    String(
+      authorizationHeader ||
+      ""
+    ).match(
+      /^Bearer\s+(.+)$/i
+    );
+
+
+  if (
+    !match
+  ) {
+
+    return null;
+
+  }
+
+
+  const token =
+    match[
+      1
+    ].trim();
+
+
+  return token ||
+    null;
+
+}
+
+
+async function verifySupabaseAccessToken(
+  accessToken
+) {
+
+  if (
+    !SUPABASE_AUTH_CONFIGURED
+  ) {
+
+    return {
+
+      status:
+        "unavailable",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  let response;
+
+
+  try {
+
+    response =
+      await fetch(
+        `${SUPABASE_URL}/auth/v1/user`,
+        {
+
+          method:
+            "GET",
+
+          headers: {
+
+            apikey:
+              SUPABASE_PUBLISHABLE_KEY,
+
+            Authorization:
+              `Bearer ${accessToken}`,
+
+            Accept:
+              "application/json",
+
+          },
+
+          signal:
+            AbortSignal.timeout(
+              5000
+            ),
+
+        }
+      );
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "Supabase Auth verification request failed",
+      {
+        message:
+          error?.message,
+      }
+    );
+
+
+    return {
+
+      status:
+        "unavailable",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  if (
+    response.status ===
+      401 ||
+    response.status ===
+      403
+  ) {
+
+    return {
+
+      status:
+        "invalid",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  if (
+    !response.ok
+  ) {
+
+    console.error(
+      "Supabase Auth verification returned an unexpected status",
+      {
+        status:
+          response.status,
+      }
+    );
+
+
+    return {
+
+      status:
+        "unavailable",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  let user;
+
+
+  try {
+
+    user =
+      await response.json();
+
+  } catch (
+    error
+  ) {
+
+    console.error(
+      "Supabase Auth returned invalid JSON",
+      {
+        message:
+          error?.message,
+      }
+    );
+
+
+    return {
+
+      status:
+        "unavailable",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  if (
+    !user ||
+    typeof user.id !==
+      "string" ||
+    !user.id
+  ) {
+
+    console.error(
+      "Supabase Auth returned a user without a valid id."
+    );
+
+
+    return {
+
+      status:
+        "unavailable",
+
+      user:
+        null,
+
+    };
+
+  }
+
+
+  return {
+
+    status:
+      "authenticated",
+
+    user: {
+
+      id:
+        user.id,
+
+      email:
+        typeof user.email ===
+          "string"
+            ? user.email
+            : null,
+
+    },
+
+  };
+
+}
+
+
+// ---------------------------------------------------------
 // Dictionaries
 // ---------------------------------------------------------
 
@@ -285,7 +588,7 @@ app.use(
 
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type"
+      "Content-Type, Authorization"
     );
 
 
@@ -2411,6 +2714,141 @@ app.get(
 
       status:
         "running",
+
+    });
+
+  }
+);
+
+
+// ---------------------------------------------------------
+// Current authenticated user
+// ---------------------------------------------------------
+
+
+app.get(
+  "/api/me",
+  async (
+    req,
+    res
+  ) => {
+
+    const authorizationHeader =
+      getAuthorizationHeader(
+        req
+      );
+
+
+    if (
+      !authorizationHeader
+    ) {
+
+      return res.json({
+
+        authenticated:
+          false,
+
+        user:
+          null,
+
+      });
+
+    }
+
+
+    const accessToken =
+      getBearerToken(
+        authorizationHeader
+      );
+
+
+    if (
+      !accessToken
+    ) {
+
+      return res
+        .status(
+          401
+        )
+        .json({
+
+          authenticated:
+            false,
+
+          user:
+            null,
+
+          error:
+            "Authorization header must use a Bearer access token.",
+
+        });
+
+    }
+
+
+    const verification =
+      await verifySupabaseAccessToken(
+        accessToken
+      );
+
+
+    if (
+      verification.status ===
+        "invalid"
+    ) {
+
+      return res
+        .status(
+          401
+        )
+        .json({
+
+          authenticated:
+            false,
+
+          user:
+            null,
+
+          error:
+            "The Supabase access token is invalid or expired.",
+
+        });
+
+    }
+
+
+    if (
+      verification.status ===
+        "unavailable"
+    ) {
+
+      return res
+        .status(
+          503
+        )
+        .json({
+
+          authenticated:
+            false,
+
+          user:
+            null,
+
+          error:
+            "Authentication verification is temporarily unavailable.",
+
+        });
+
+    }
+
+
+    return res.json({
+
+      authenticated:
+        true,
+
+      user:
+        verification.user,
 
     });
 
