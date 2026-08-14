@@ -172,6 +172,43 @@ export const LANGUAGES = {
     },
   },
 
+  welsh: {
+    id: "welsh",
+    name: "Welsh",
+    locale: "cy-GB",
+    aiLanguageName: "Welsh",
+    direction: "ltr",
+    specialCharacters: [
+      "â",
+      "ê",
+      "î",
+      "ô",
+      "û",
+      "ŵ",
+      "ŷ",
+      "ï",
+    ],
+    wiktionaryLanguageCode: "cy",
+    dictionary: {
+      sourceUrl:
+        "https://kaikki.org/dictionary/Welsh/kaikki.org-dictionary-Welsh.jsonl",
+      compressed: false,
+      path: "data/welsh.sqlite",
+    },
+    openings: {
+      coffee:
+        "Bore da! Beth hoffech chi ei archebu?",
+      weekend:
+        "Helo! Sut oedd dy benwythnos?",
+      directions:
+        "Esgusodwch fi, allwch chi ddweud wrthyf sut i gyrraedd yr orsaf?",
+    },
+    outputInstructions: `
+- Write all target-language dialogue in natural modern Welsh.
+- Keep the language appropriate to the learner's selected CEFR level.
+- When correcting the learner, keep the corrected version in Welsh.`,
+  },
+
   russian: {
     id: "russian",
     name: "Russian",
@@ -228,6 +265,72 @@ export const LANGUAGES = {
       directions:
         "Извините, вы не подскажете, как пройти к вокзалу?",
     },
+  },
+
+  persian: {
+    id: "persian",
+    name: "Persian (Farsi)",
+    locale: "fa-IR",
+    aiLanguageName: "Persian (Farsi)",
+    direction: "rtl",
+    specialCharacters: [
+      "ا",
+      "آ",
+      "ب",
+      "پ",
+      "ت",
+      "ث",
+      "ج",
+      "چ",
+      "ح",
+      "خ",
+      "د",
+      "ذ",
+      "ر",
+      "ز",
+      "ژ",
+      "س",
+      "ش",
+      "ص",
+      "ض",
+      "ط",
+      "ظ",
+      "ع",
+      "غ",
+      "ف",
+      "ق",
+      "ک",
+      "گ",
+      "ل",
+      "م",
+      "ن",
+      "و",
+      "ه",
+      "ی",
+      "ء",
+      "ؤ",
+      "ئ",
+    ],
+    wiktionaryLanguageCode: "fa",
+    dictionary: {
+      sourceUrl:
+        "https://kaikki.org/dictionary/Persian/kaikki.org-dictionary-Persian.jsonl",
+      compressed: false,
+      path: "data/persian.sqlite",
+    },
+    openings: {
+      coffee:
+        "سلام! چه چیزی میل دارید سفارش بدهید؟",
+      weekend:
+        "سلام! آخر هفته شما چطور بود؟",
+      directions:
+        "ببخشید، می‌توانید به من بگویید چطور به ایستگاه قطار بروم؟",
+    },
+    outputInstructions: `
+- Write all target-language dialogue in natural contemporary Iranian Persian (Farsi).
+- Use Persian script, not transliteration.
+- Keep the language appropriate to the learner's selected CEFR level.
+- When correcting the learner, keep the corrected version in Persian script.`,
   },
 
   arabic: {
