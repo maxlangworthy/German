@@ -52,72 +52,43 @@ const VOCAB_TEST_TTL_MS =
 const LEVELS = {
 
   a1: {
-    id:
-      "a1",
-
-    name:
-      "A1 — Beginner",
-
+    id: "a1",
+    name: "A1 — Beginner",
     prompt:
       "Use very simple, high-frequency vocabulary and short sentences. Keep the interaction easy to follow and do not demand grammar beyond a beginner level.",
   },
 
-
   a2: {
-    id:
-      "a2",
-
-    name:
-      "A2 — Elementary",
-
+    id: "a2",
+    name: "A2 — Elementary",
     prompt:
       "Use common everyday vocabulary, mostly simple sentence structures, and manageable follow-up questions suitable for an elementary learner.",
   },
 
-
   b1: {
-    id:
-      "b1",
-
-    name:
-      "B1 — Intermediate",
-
+    id: "b1",
+    name: "B1 — Intermediate",
     prompt:
       "Use natural everyday language at an intermediate level, with some variety in vocabulary and sentence structure without becoming unnecessarily difficult.",
   },
 
-
   b2: {
-    id:
-      "b2",
-
-    name:
-      "B2 — Upper-intermediate",
-
+    id: "b2",
+    name: "B2 — Upper-intermediate",
     prompt:
       "Use fluent, natural language with broader vocabulary, idiomatic phrasing where appropriate, and more varied sentence structures suitable for an upper-intermediate learner.",
   },
 
-
   c1: {
-    id:
-      "c1",
-
-    name:
-      "C1 — Advanced",
-
+    id: "c1",
+    name: "C1 — Advanced",
     prompt:
       "Use sophisticated, natural language with nuanced vocabulary and idiomatic phrasing while remaining appropriate to the scenario.",
   },
 
-
   c2: {
-    id:
-      "c2",
-
-    name:
-      "C2 — Proficient",
-
+    id: "c2",
+    name: "C2 — Proficient",
     prompt:
       "Use fully natural, nuanced language at a proficient level, including subtle register choices and idiomatic expression where they fit the scenario.",
   },
@@ -200,7 +171,7 @@ if (
 ) {
 
   console.warn(
-    "Supabase authentication is not configured. Authenticated features will be unavailable."
+    "Supabase authentication is not configured."
   );
 
 }
@@ -211,7 +182,7 @@ if (
 ) {
 
   console.warn(
-    "Supabase trusted database access is not configured. Learner stats will not be saved."
+    "Supabase trusted database access is not configured. Learner statistics will not be saved."
   );
 
 }
@@ -314,10 +285,8 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth verification request failed",
       {
-
         message:
           error?.message,
-
       }
     );
 
@@ -362,10 +331,8 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth verification returned an unexpected status",
       {
-
         status:
           response.status,
-
       }
     );
 
@@ -398,10 +365,8 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth returned invalid JSON",
       {
-
         message:
           error?.message,
-
       }
     );
 
@@ -789,6 +754,7 @@ async function recordVocabularyTestSuccess({
 
 async function recordChatSeconds(
   userId,
+  languageId,
   seconds
 ) {
 
@@ -822,6 +788,9 @@ async function recordChatSeconds(
 
       p_user_id:
         userId,
+
+      p_language:
+        languageId,
 
       p_seconds:
         bounded,
@@ -916,11 +885,8 @@ async function fetchOwnVocabularyRows({
 
     const response =
       await fetch(
-        `${SUPABASE_URL}/rest/v1/vocabulary?${params.toString()}`,
+        `${SUPABASE_URL}/rest/v1/vocabulary?${params}`,
         {
-
-          method:
-            "GET",
 
           headers: {
 
@@ -1007,34 +973,24 @@ async function fetchOwnTotalChatSeconds({
 }) {
 
   const params =
-    new URLSearchParams();
+    new URLSearchParams({
 
+      select:
+        "total_chat_seconds",
 
-  params.set(
-    "select",
-    "total_chat_seconds"
-  );
+      user_id:
+        `eq.${userId}`,
 
+      limit:
+        "1",
 
-  params.set(
-    "user_id",
-    `eq.${userId}`
-  );
-
-
-  params.set(
-    "limit",
-    "1"
-  );
+    });
 
 
   const response =
     await fetch(
-      `${SUPABASE_URL}/rest/v1/learner_stats?${params.toString()}`,
+      `${SUPABASE_URL}/rest/v1/learner_stats?${params}`,
       {
-
-        method:
-          "GET",
 
         headers: {
 
@@ -1095,6 +1051,111 @@ async function fetchOwnTotalChatSeconds({
       0
     )
   );
+
+}
+
+
+async function fetchOwnLanguageChatRows({
+
+  accessToken,
+
+  userId,
+
+  languageId =
+    null,
+
+}) {
+
+  const params =
+    new URLSearchParams();
+
+
+  params.set(
+    "select",
+    "language,total_chat_seconds"
+  );
+
+
+  params.set(
+    "user_id",
+    `eq.${userId}`
+  );
+
+
+  if (
+    languageId
+  ) {
+
+    params.set(
+      "language",
+      `eq.${languageId}`
+    );
+
+  }
+
+
+  params.set(
+    "order",
+    "language.asc"
+  );
+
+
+  const response =
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/learner_language_stats?${params}`,
+      {
+
+        headers: {
+
+          apikey:
+            SUPABASE_PUBLISHABLE_KEY,
+
+          Authorization:
+            `Bearer ${accessToken}`,
+
+          Accept:
+            "application/json",
+
+        },
+
+        signal:
+          AbortSignal.timeout(
+            5000
+          ),
+
+      }
+    );
+
+
+  if (
+    !response.ok
+  ) {
+
+    throw new Error(
+      `Supabase language chat stats read failed with status ${response.status}`
+    );
+
+  }
+
+
+  const rows =
+    await response.json();
+
+
+  if (
+    !Array.isArray(
+      rows
+    )
+  ) {
+
+    throw new Error(
+      "Supabase language chat stats returned an invalid response."
+    );
+
+  }
+
+
+  return rows;
 
 }
 
@@ -1167,9 +1228,7 @@ for (
         )
         .all()
         .map(
-          (
-            row
-          ) =>
+          row =>
             row.name
         );
 
@@ -1249,13 +1308,6 @@ for (
 
     } catch {
 
-      maxRowid =
-        0;
-
-
-      randomFromRowid =
-        null;
-
     }
 
 
@@ -1300,10 +1352,8 @@ for (
     console.error(
       `${language.name} dictionary could not be opened`,
       {
-
         message:
           error?.message,
-
       }
     );
 
@@ -1422,17 +1472,14 @@ function normaliseSenseList(
       "string"
     ) {
 
-      const meaning =
-        item.trim();
-
-
       if (
-        meaning
+        item.trim()
       ) {
 
         senses.push({
 
-          meaning,
+          meaning:
+            item.trim(),
 
           tags: [],
 
@@ -1480,17 +1527,13 @@ function normaliseSenseList(
       )
         ? item.tags
             .filter(
-              (
-                tag
-              ) =>
+              tag =>
                 typeof tag ===
                   "string" &&
                 tag.trim()
             )
             .map(
-              (
-                tag
-              ) =>
+              tag =>
                 tag.trim()
             )
         : [];
@@ -1663,9 +1706,7 @@ function compactDictionaryRows(
     const key =
       `${lemma}|${pos}|${cleanSenses
         .map(
-          (
-            sense
-          ) =>
+          sense =>
             sense.meaning
         )
         .join(
@@ -1703,9 +1744,7 @@ function compactDictionaryRows(
 
       meanings:
         cleanSenses.map(
-          (
-            sense
-          ) =>
+          sense =>
             sense.meaning
         ),
 
@@ -1794,17 +1833,13 @@ function compactDictionaryRows(
         requestedPos
           ? [
               ...lemmaRows.filter(
-                (
-                  item
-                ) =>
+                item =>
                   item.pos ===
                   requestedPos
               ),
 
               ...lemmaRows.filter(
-                (
-                  item
-                ) =>
+                item =>
                   item.pos !==
                   requestedPos
               ),
@@ -1878,7 +1913,7 @@ function compactDictionaryRows(
 
 
 // ---------------------------------------------------------
-// Structured schemas
+// Structured AI schemas
 // ---------------------------------------------------------
 
 
@@ -2192,7 +2227,7 @@ function makeNewVocabularySchema(
 
 
 // ---------------------------------------------------------
-// Conversation validation
+// Conversation validation / prompts
 // ---------------------------------------------------------
 
 
@@ -2527,11 +2562,6 @@ function getConversationContext(
 }
 
 
-// ---------------------------------------------------------
-// Prompts
-// ---------------------------------------------------------
-
-
 function buildTargetLanguageInstructions(
   language
 ) {
@@ -2670,9 +2700,7 @@ function extractWordTokens(
       /\p{L}[\p{L}\p{M}'’-]*/gu
     ),
   ].map(
-    (
-      match
-    ) =>
+    match =>
       match[
         0
       ]
@@ -2723,9 +2751,7 @@ function alignWordMetadata(
   const modelWords =
     metadata
       .filter(
-        (
-          item
-        ) =>
+        item =>
           item &&
           typeof item.surface ===
             "string" &&
@@ -2735,9 +2761,7 @@ function alignWordMetadata(
             "string"
       )
       .map(
-        (
-          item
-        ) => ({
+        item => ({
 
           surface:
             item.surface,
@@ -3019,17 +3043,13 @@ function resolveLearnerVocabularyItem(
   const orderedRows = [
 
     ...rows.filter(
-      (
-        row
-      ) =>
+      row =>
         row.word ===
         word
     ),
 
     ...rows.filter(
-      (
-        row
-      ) =>
+      row =>
         row.word !==
         word
     ),
@@ -3048,17 +3068,13 @@ function resolveLearnerVocabularyItem(
       row.lemmas
     )
       .filter(
-        (
-          lemma
-        ) =>
+        lemma =>
           typeof lemma ===
             "string" &&
           lemma.trim()
       )
       .map(
-        (
-          lemma
-        ) =>
+        lemma =>
           lemma.trim()
       );
 
@@ -3096,27 +3112,21 @@ function resolveLearnerVocabularyItem(
         );
 
 
-    const preferredLemmaRow =
+    const preferred =
       lemmaRows.find(
-        (
-          item
-        ) =>
+        item =>
           item.word ===
             lemma &&
           item.pos ===
             row.pos
       ) ||
       lemmaRows.find(
-        (
-          item
-        ) =>
+        item =>
           item.pos ===
           row.pos
       ) ||
       lemmaRows.find(
-        (
-          item
-        ) =>
+        item =>
           item.word ===
           lemma
       ) ||
@@ -3126,29 +3136,29 @@ function resolveLearnerVocabularyItem(
 
 
     if (
-      preferredLemmaRow
+      preferred
     ) {
 
       if (
-        typeof preferredLemmaRow.word ===
+        typeof preferred.word ===
           "string" &&
-        preferredLemmaRow.word.trim()
+        preferred.word.trim()
       ) {
 
         lemma =
-          preferredLemmaRow.word.trim();
+          preferred.word.trim();
 
       }
 
 
       if (
-        typeof preferredLemmaRow.pos ===
+        typeof preferred.pos ===
           "string" &&
-        preferredLemmaRow.pos.trim()
+        preferred.pos.trim()
       ) {
 
         partOfSpeech =
-          preferredLemmaRow.pos.trim();
+          preferred.pos.trim();
 
       }
 
@@ -3235,13 +3245,7 @@ function extractLearnerVocabulary(
         item
       );
 
-
-      continue;
-
-    }
-
-
-    if (
+    } else if (
       (
         !existing.part_of_speech ||
         existing.part_of_speech ===
@@ -3389,17 +3393,13 @@ function makeTestItemFromRow(
       row.lemmas
     )
       .filter(
-        (
-          lemma
-        ) =>
+        lemma =>
           typeof lemma ===
             "string" &&
           lemma.trim()
       )
       .map(
-        (
-          lemma
-        ) =>
+        lemma =>
           lemma.trim()
       );
 
@@ -3564,17 +3564,13 @@ function resolveTestItemFromWord(
   const ordered = [
 
     ...rows.filter(
-      (
-        row
-      ) =>
+      row =>
         row.word ===
         cleaned
     ),
 
     ...rows.filter(
-      (
-        row
-      ) =>
+      row =>
         row.word !==
         cleaned
     ),
@@ -3613,7 +3609,7 @@ function resolveTestItemFromWord(
         );
 
 
-      const accepted = [
+      item.acceptedAnswers = [
         stored,
         ...item.acceptedAnswers,
       ].filter(
@@ -3623,9 +3619,7 @@ function resolveTestItemFromWord(
           arr
         ) =>
           arr.findIndex(
-            (
-              candidate
-            ) =>
+            candidate =>
               exactAnswerKey(
                 candidate
               ) ===
@@ -3639,10 +3633,6 @@ function resolveTestItemFromWord(
 
       item.primaryLemma =
         stored;
-
-
-      item.acceptedAnswers =
-        accepted;
 
 
       item.lemmaKey =
@@ -3817,9 +3807,7 @@ async function chooseNewVocabularyWithAI(
   const known =
     knownRows
       .map(
-        (
-          row
-        ) =>
+        row =>
           row.lemma
       )
       .filter(
@@ -3871,9 +3859,7 @@ async function chooseNewVocabularyWithAI(
   const knownKeys =
     new Set(
       knownRows.map(
-        (
-          row
-        ) =>
+        row =>
           normalizeWord(
             row.lemma_key ||
             row.lemma,
@@ -3953,9 +3939,7 @@ function addMultipleChoiceOptions(
 
   const allPrimary =
     items.map(
-      (
-        item
-      ) =>
+      item =>
         item.primaryLemma
     );
 
@@ -4002,22 +3986,22 @@ function addMultipleChoiceOptions(
     }
 
 
-    let attempts =
+    let extraAttempts =
       0;
 
 
     while (
       options.size <
         4 &&
-      attempts <
+      extraAttempts <
         30
     ) {
 
-      attempts +=
+      extraAttempts +=
         1;
 
 
-      const extra =
+      const extras =
         getRandomDictionaryTestItems(
           language,
           1
@@ -4025,7 +4009,7 @@ function addMultipleChoiceOptions(
 
 
       if (
-        !extra.length
+        !extras.length
       ) {
 
         break;
@@ -4034,7 +4018,7 @@ function addMultipleChoiceOptions(
 
 
       options.add(
-        extra[
+        extras[
           0
         ].primaryLemma
       );
@@ -4065,14 +4049,14 @@ function cleanupVocabTestSessions() {
   for (
     const [
       testId,
-      session,
+      testSession,
     ]
     of vocabTestSessions.entries()
   ) {
 
     if (
       now -
-      session.createdAt >
+      testSession.createdAt >
       VOCAB_TEST_TTL_MS
     ) {
 
@@ -4088,7 +4072,7 @@ function cleanupVocabTestSessions() {
 
 
 // ---------------------------------------------------------
-// OpenAI helpers
+// OpenAI helper
 // ---------------------------------------------------------
 
 
@@ -4126,16 +4110,12 @@ function responseContainsRefusal(
     response?.output
   )
     ? response.output.some(
-        (
-          item
-        ) =>
+        item =>
           Array.isArray(
             item?.content
           )
             ? item.content.some(
-                (
-                  content
-                ) =>
+                content =>
                   content?.type ===
                   "refusal"
               )
@@ -4481,7 +4461,7 @@ app.use(
 
 
 // ---------------------------------------------------------
-// Basic routes
+// Basic/auth/config routes
 // ---------------------------------------------------------
 
 
@@ -4702,9 +4682,7 @@ app.get(
         Object.values(
           LANGUAGES
         ).map(
-          (
-            language
-          ) => ({
+          language => ({
 
             id:
               language.id,
@@ -4738,9 +4716,7 @@ app.get(
         Object.values(
           LEVELS
         ).map(
-          (
-            level
-          ) => ({
+          level => ({
 
             id:
               level.id,
@@ -4788,7 +4764,7 @@ app.get(
 
 
 // ---------------------------------------------------------
-// Dictionary lookup
+// Dictionary
 // ---------------------------------------------------------
 
 
@@ -5001,7 +4977,7 @@ app.get(
 
 
 // ---------------------------------------------------------
-// Vocabulary stats + total chat time
+// Vocabulary + chat-time stats
 // ---------------------------------------------------------
 
 
@@ -5073,28 +5049,47 @@ app.get(
 
     try {
 
-      const rows =
-        await fetchOwnVocabularyRows({
-
-          accessToken:
-            auth.accessToken,
-
-          userId:
-            auth.user.id,
-
-          languageId:
-            requestedLanguage?.id ||
-            null,
-
-          fields:
-            "language,lemma",
-
-        });
-
-
       if (
         requestedLanguage
       ) {
+
+        const [
+          rows,
+          chatRows,
+        ] =
+          await Promise.all([
+
+            fetchOwnVocabularyRows({
+
+              accessToken:
+                auth.accessToken,
+
+              userId:
+                auth.user.id,
+
+              languageId:
+                requestedLanguage.id,
+
+              fields:
+                "language,lemma",
+
+            }),
+
+            fetchOwnLanguageChatRows({
+
+              accessToken:
+                auth.accessToken,
+
+              userId:
+                auth.user.id,
+
+              languageId:
+                requestedLanguage.id,
+
+            }),
+
+          ]);
+
 
         return res.json({
 
@@ -5111,11 +5106,20 @@ app.get(
           count:
             rows.length,
 
+          chatSeconds:
+            Math.max(
+              0,
+              Number(
+                chatRows[
+                  0
+                ]?.total_chat_seconds ||
+                0
+              )
+            ),
+
           items:
             rows.map(
-              (
-                row
-              ) =>
+              row =>
                 row.lemma
             ),
 
@@ -5124,19 +5128,50 @@ app.get(
       }
 
 
-      const totalChatSeconds =
-        await fetchOwnTotalChatSeconds({
+      const [
+        rows,
+        totalChatSeconds,
+        languageChatRows,
+      ] =
+        await Promise.all([
 
-          accessToken:
-            auth.accessToken,
+          fetchOwnVocabularyRows({
 
-          userId:
-            auth.user.id,
+            accessToken:
+              auth.accessToken,
 
-        });
+            userId:
+              auth.user.id,
+
+            fields:
+              "language,lemma",
+
+          }),
+
+          fetchOwnTotalChatSeconds({
+
+            accessToken:
+              auth.accessToken,
+
+            userId:
+              auth.user.id,
+
+          }),
+
+          fetchOwnLanguageChatRows({
+
+            accessToken:
+              auth.accessToken,
+
+            userId:
+              auth.user.id,
+
+          }),
+
+        ]);
 
 
-      const counts =
+      const vocabCounts =
         new Map();
 
 
@@ -5145,10 +5180,10 @@ app.get(
         of rows
       ) {
 
-        counts.set(
+        vocabCounts.set(
           row.language,
           (
-            counts.get(
+            vocabCounts.get(
               row.language
             ) ||
             0
@@ -5159,6 +5194,97 @@ app.get(
       }
 
 
+      const chatCounts =
+        new Map();
+
+
+      for (
+        const row
+        of languageChatRows
+      ) {
+
+        chatCounts.set(
+          row.language,
+          Math.max(
+            0,
+            Number(
+              row.total_chat_seconds ||
+              0
+            )
+          )
+        );
+
+      }
+
+
+      const usedLanguageIds =
+        new Set([
+          ...vocabCounts.keys(),
+          ...chatCounts.keys(),
+        ]);
+
+
+      const languages =
+        Object.values(
+          LANGUAGES
+        )
+          .filter(
+            language =>
+              usedLanguageIds.has(
+                language.id
+              )
+          )
+          .map(
+            language => ({
+
+              id:
+                language.id,
+
+              name:
+                language.name,
+
+              count:
+                vocabCounts.get(
+                  language.id
+                ) ||
+                0,
+
+              chatSeconds:
+                chatCounts.get(
+                  language.id
+                ) ||
+                0,
+
+            })
+          );
+
+
+      const allocatedChatSeconds =
+        languageChatRows.reduce(
+          (
+            total,
+            row
+          ) =>
+            total +
+            Math.max(
+              0,
+              Number(
+                row.total_chat_seconds ||
+                0
+              )
+            ),
+          0
+        );
+
+
+      const unallocatedChatSeconds =
+        Math.max(
+          0,
+          totalChatSeconds -
+          allocatedChatSeconds
+        );
+
+
       return res.json({
 
         overallTotal:
@@ -5166,36 +5292,9 @@ app.get(
 
         totalChatSeconds,
 
-        languages:
-          Object.values(
-            LANGUAGES
-          )
-            .filter(
-              (
-                language
-              ) =>
-                counts.has(
-                  language.id
-                )
-            )
-            .map(
-              (
-                language
-              ) => ({
+        unallocatedChatSeconds,
 
-                id:
-                  language.id,
-
-                name:
-                  language.name,
-
-                count:
-                  counts.get(
-                    language.id
-                  ),
-
-              })
-            ),
+        languages,
 
       });
 
@@ -5204,7 +5303,7 @@ app.get(
     ) {
 
       console.error(
-        "Vocabulary statistics read failed",
+        "Vocabulary/statistics read failed",
         {
 
           userId:
@@ -5224,7 +5323,7 @@ app.get(
         .json({
 
           error:
-            "Vocabulary statistics are temporarily unavailable.",
+            "Learner statistics are temporarily unavailable.",
 
         });
 
@@ -5235,7 +5334,7 @@ app.get(
 
 
 // ---------------------------------------------------------
-// Start conversation
+// Conversation endpoints
 // ---------------------------------------------------------
 
 
@@ -5367,11 +5466,6 @@ app.post(
 
   }
 );
-
-
-// ---------------------------------------------------------
-// Chat
-// ---------------------------------------------------------
 
 
 app.post(
@@ -5551,9 +5645,7 @@ app.post(
 
       void optionalUserPromise
         .then(
-          async (
-            user
-          ) => {
+          async user => {
 
             if (
               !user
@@ -5577,11 +5669,10 @@ app.post(
 
                 recordChatSeconds(
                   user.id,
+                  context.language.id,
                   chatSeconds
                 ).catch(
-                  (
-                    error
-                  ) => {
+                  error => {
 
                     console.error(
                       "Chat time persistence failed",
@@ -5589,6 +5680,9 @@ app.post(
 
                         userId:
                           user.id,
+
+                        language:
+                          context.language.id,
 
                         message:
                           error?.message,
@@ -5636,9 +5730,7 @@ app.post(
                       vocabularyItems,
 
                   }).catch(
-                    (
-                      error
-                    ) => {
+                    error => {
 
                       console.error(
                         "Vocabulary persistence failed",
@@ -5670,9 +5762,7 @@ app.post(
           }
         )
         .catch(
-          (
-            error
-          ) => {
+          error => {
 
             console.error(
               "Optional learner-stat persistence failed",
@@ -5724,11 +5814,6 @@ app.post(
 
   }
 );
-
-
-// ---------------------------------------------------------
-// Example response
-// ---------------------------------------------------------
 
 
 app.post(
@@ -6341,9 +6426,7 @@ app.post(
 
       const questions =
         selected.map(
-          (
-            item
-          ) => ({
+          item => ({
 
             id:
               randomUUID(),
@@ -6411,9 +6494,7 @@ app.post(
 
         questions:
           questions.map(
-            (
-              question
-            ) => ({
+            question => ({
 
               id:
                 question.id,
@@ -6603,9 +6684,7 @@ app.post(
 
     const question =
       testSession.questions.find(
-        (
-          item
-        ) =>
+        item =>
           item.id ===
           questionId
       );
@@ -6649,9 +6728,7 @@ app.post(
 
     const matchingAnswer =
       question.acceptedAnswers.find(
-        (
-          candidate
-        ) =>
+        candidate =>
           exactAnswerKey(
             candidate
           ) ===
@@ -6674,7 +6751,7 @@ app.post(
 
 
     /*
-      Multiple-choice answers affect only the current score.
+      Multiple choice affects only the current quiz score.
 
       Only a correct Hardcore answer becomes persistent
       vocabulary evidence.
@@ -6768,17 +6845,11 @@ app.post(
     }
 
 
-    const allAnswered =
-      testSession.questions.every(
-        (
-          item
-        ) =>
-          item.answered
-      );
-
-
     if (
-      allAnswered
+      testSession.questions.every(
+        item =>
+          item.answered
+      )
     ) {
 
       setTimeout(
