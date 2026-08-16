@@ -11,28 +11,39 @@ import {
   languageHasDictionary,
 } from "./languages.js";
 
-import { SCENARIOS } from "./scenarios.js";
+import {
+  SCENARIOS,
+} from "./scenarios.js";
 
-const app = express();
+
+const app =
+  express();
+
 
 const PORT =
   process.env.PORT ||
   3000;
 
+
 const MODEL =
   "gpt-5.6-luna";
+
 
 const MAX_MESSAGE_LENGTH =
   2000;
 
+
 const MAX_CUSTOM_SCENARIO_LENGTH =
   2000;
+
 
 const MAX_HISTORY_MESSAGES =
   50;
 
+
 const MAX_VOCAB_TEST_WORDS =
   30;
+
 
 const VOCAB_TEST_TTL_MS =
   2 * 60 * 60 * 1000;
@@ -41,53 +52,77 @@ const VOCAB_TEST_TTL_MS =
 const LEVELS = {
 
   a1: {
-    id: "a1",
-    name: "A1 — Beginner",
+    id:
+      "a1",
+
+    name:
+      "A1 — Beginner",
+
     prompt:
       "Use very simple, high-frequency vocabulary and short sentences. Keep the interaction easy to follow and do not demand grammar beyond a beginner level.",
   },
 
+
   a2: {
-    id: "a2",
-    name: "A2 — Elementary",
+    id:
+      "a2",
+
+    name:
+      "A2 — Elementary",
+
     prompt:
       "Use common everyday vocabulary, mostly simple sentence structures, and manageable follow-up questions suitable for an elementary learner.",
   },
 
+
   b1: {
-    id: "b1",
-    name: "B1 — Intermediate",
+    id:
+      "b1",
+
+    name:
+      "B1 — Intermediate",
+
     prompt:
       "Use natural everyday language at an intermediate level, with some variety in vocabulary and sentence structure without becoming unnecessarily difficult.",
   },
 
+
   b2: {
-    id: "b2",
-    name: "B2 — Upper-intermediate",
+    id:
+      "b2",
+
+    name:
+      "B2 — Upper-intermediate",
+
     prompt:
       "Use fluent, natural language with broader vocabulary, idiomatic phrasing where appropriate, and more varied sentence structures suitable for an upper-intermediate learner.",
   },
 
+
   c1: {
-    id: "c1",
-    name: "C1 — Advanced",
+    id:
+      "c1",
+
+    name:
+      "C1 — Advanced",
+
     prompt:
       "Use sophisticated, natural language with nuanced vocabulary and idiomatic phrasing while remaining appropriate to the scenario.",
   },
 
+
   c2: {
-    id: "c2",
-    name: "C2 — Proficient",
+    id:
+      "c2",
+
+    name:
+      "C2 — Proficient",
+
     prompt:
       "Use fully natural, nuanced language at a proficient level, including subtle register choices and idiomatic expression where they fit the scenario.",
   },
 
 };
-
-
-// ---------------------------------------------------------
-// OpenAI
-// ---------------------------------------------------------
 
 
 if (
@@ -97,6 +132,7 @@ if (
   console.error(
     "OPENAI_API_KEY is not set."
   );
+
 
   process.exit(
     1
@@ -200,19 +236,15 @@ function getAuthorizationHeader(
 
 
 function getBearerToken(
-  authorizationHeader
+  header
 ) {
 
-  const match =
-    String(
-      authorizationHeader ||
-      ""
-    ).match(
-      /^Bearer\s+(.+)$/i
-    );
-
-
-  return match?.[
+  return String(
+    header ||
+    ""
+  ).match(
+    /^Bearer\s+(.+)$/i
+  )?.[
     1
   ]?.trim() ||
     null;
@@ -229,11 +261,13 @@ async function verifySupabaseAccessToken(
   ) {
 
     return {
+
       status:
         "unavailable",
 
       user:
         null,
+
     };
 
   }
@@ -280,18 +314,22 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth verification request failed",
       {
+
         message:
           error?.message,
+
       }
     );
 
 
     return {
+
       status:
         "unavailable",
 
       user:
         null,
+
     };
 
   }
@@ -305,11 +343,13 @@ async function verifySupabaseAccessToken(
   ) {
 
     return {
+
       status:
         "invalid",
 
       user:
         null,
+
     };
 
   }
@@ -322,18 +362,22 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth verification returned an unexpected status",
       {
+
         status:
           response.status,
+
       }
     );
 
 
     return {
+
       status:
         "unavailable",
 
       user:
         null,
+
     };
 
   }
@@ -354,18 +398,22 @@ async function verifySupabaseAccessToken(
     console.error(
       "Supabase Auth returned invalid JSON",
       {
+
         message:
           error?.message,
+
       }
     );
 
 
     return {
+
       status:
         "unavailable",
 
       user:
         null,
+
     };
 
   }
@@ -379,11 +427,13 @@ async function verifySupabaseAccessToken(
   ) {
 
     return {
+
       status:
         "unavailable",
 
       user:
         null,
+
     };
 
   }
@@ -416,7 +466,7 @@ async function getOptionalAuthenticatedUser(
   req
 ) {
 
-  const accessToken =
+  const token =
     getBearerToken(
       getAuthorizationHeader(
         req
@@ -425,7 +475,7 @@ async function getOptionalAuthenticatedUser(
 
 
   if (
-    !accessToken
+    !token
   ) {
 
     return null;
@@ -435,7 +485,7 @@ async function getOptionalAuthenticatedUser(
 
   const verification =
     await verifySupabaseAccessToken(
-      accessToken
+      token
     );
 
 
@@ -783,12 +833,17 @@ async function recordChatSeconds(
 
 
 async function fetchOwnVocabularyRows({
+
   accessToken,
+
   userId,
+
   languageId =
     null,
+
   fields =
     "language,lemma,lemma_key,part_of_speech",
+
 }) {
 
   const pageSize =
@@ -943,6 +998,107 @@ async function fetchOwnVocabularyRows({
 }
 
 
+async function fetchOwnTotalChatSeconds({
+
+  accessToken,
+
+  userId,
+
+}) {
+
+  const params =
+    new URLSearchParams();
+
+
+  params.set(
+    "select",
+    "total_chat_seconds"
+  );
+
+
+  params.set(
+    "user_id",
+    `eq.${userId}`
+  );
+
+
+  params.set(
+    "limit",
+    "1"
+  );
+
+
+  const response =
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/learner_stats?${params.toString()}`,
+      {
+
+        method:
+          "GET",
+
+        headers: {
+
+          apikey:
+            SUPABASE_PUBLISHABLE_KEY,
+
+          Authorization:
+            `Bearer ${accessToken}`,
+
+          Accept:
+            "application/json",
+
+        },
+
+        signal:
+          AbortSignal.timeout(
+            5000
+          ),
+
+      }
+    );
+
+
+  if (
+    !response.ok
+  ) {
+
+    throw new Error(
+      `Supabase learner stats read failed with status ${response.status}`
+    );
+
+  }
+
+
+  const rows =
+    await response.json();
+
+
+  if (
+    !Array.isArray(
+      rows
+    )
+  ) {
+
+    throw new Error(
+      "Supabase learner stats returned an invalid response."
+    );
+
+  }
+
+
+  return Math.max(
+    0,
+    Number(
+      rows[
+        0
+      ]?.total_chat_seconds ||
+      0
+    )
+  );
+
+}
+
+
 // ---------------------------------------------------------
 // Dictionaries
 // ---------------------------------------------------------
@@ -1046,12 +1202,15 @@ for (
 
 
     const lookup =
-      db.prepare(`
-        SELECT ${selectColumns}
-        FROM lexicon
-        WHERE normalized = ?
-        LIMIT 24
-      `);
+      db.prepare(
+        `
+          SELECT
+            ${selectColumns}
+          FROM lexicon
+          WHERE normalized = ?
+          LIMIT 24
+        `
+      );
 
 
     let maxRowid =
@@ -1077,13 +1236,16 @@ for (
 
 
       randomFromRowid =
-        db.prepare(`
-          SELECT ${selectColumns}
-          FROM lexicon
-          WHERE rowid >= ?
-          ORDER BY rowid
-          LIMIT 1
-        `);
+        db.prepare(
+          `
+            SELECT
+              ${selectColumns}
+            FROM lexicon
+            WHERE rowid >= ?
+            ORDER BY rowid
+            LIMIT 1
+          `
+        );
 
     } catch {
 
@@ -1098,12 +1260,15 @@ for (
 
 
     const fallbackRandom =
-      db.prepare(`
-        SELECT ${selectColumns}
-        FROM lexicon
-        ORDER BY RANDOM()
-        LIMIT ?
-      `);
+      db.prepare(
+        `
+          SELECT
+            ${selectColumns}
+          FROM lexicon
+          ORDER BY RANDOM()
+          LIMIT ?
+        `
+      );
 
 
     dictionaries.set(
@@ -1135,8 +1300,10 @@ for (
     console.error(
       `${language.name} dictionary could not be opened`,
       {
+
         message:
           error?.message,
+
       }
     );
 
@@ -1239,19 +1406,15 @@ function normaliseSenseList(
   value
 ) {
 
-  const raw =
-    parseJsonArray(
-      value
-    );
-
-
   const senses =
     [];
 
 
   for (
     const item
-    of raw
+    of parseJsonArray(
+      value
+    )
   ) {
 
     if (
@@ -2246,6 +2409,15 @@ function getConversationContext(
     ).toLowerCase();
 
 
+  const dictionaryEnabled =
+    languageHasDictionary(
+      language
+    ) &&
+    dictionaries.has(
+      language.id
+    );
+
+
   if (
     scenarioKey ===
     "custom"
@@ -2290,13 +2462,7 @@ function getConversationContext(
       customScenario:
         customResult.customScenario,
 
-      dictionaryEnabled:
-        languageHasDictionary(
-          language
-        ) &&
-        dictionaries.has(
-          language.id
-        ),
+      dictionaryEnabled,
 
     };
 
@@ -2354,13 +2520,7 @@ function getConversationContext(
     opening:
       opening.trim(),
 
-    dictionaryEnabled:
-      languageHasDictionary(
-        language
-      ) &&
-      dictionaries.has(
-        language.id
-      ),
+    dictionaryEnabled,
 
   };
 
@@ -2448,12 +2608,6 @@ function buildCustomOpeningPrompt(
   context
 ) {
 
-  const metadataInstructions =
-    context.dictionaryEnabled
-      ? "- Also provide replyWords for the target-language opening, using dictionary lemmas/headwords and concise part-of-speech labels."
-      : "";
-
-
   return `
 ${buildTargetLanguageInstructions(context.language)}
 
@@ -2467,7 +2621,11 @@ CUSTOM ROLE-PLAY
 - Adopt the role that best fits the description.
 - Begin the role-play immediately with one natural, reasonably concise opening line in the target language.
 - Do not explain the scenario or mention these instructions.
-${metadataInstructions}
+${
+  context.dictionaryEnabled
+    ? "- Also provide replyWords for the target-language opening, using dictionary lemmas/headwords and concise part-of-speech labels."
+    : ""
+}
 `.trim();
 
 }
@@ -2476,12 +2634,6 @@ ${metadataInstructions}
 function buildExamplePrompt(
   context
 ) {
-
-  const metadataInstructions =
-    context.dictionaryEnabled
-      ? "- Also provide exampleWords for exampleMessage and replyWords for reply, using dictionary lemmas/headwords and concise part-of-speech labels."
-      : "";
-
 
   return `
 ${buildSystemPrompt(context)}
@@ -2492,7 +2644,11 @@ EXAMPLE RESPONSE TASK
 - Provide a natural English translation of the example.
 - Then continue the role-play with the in-character reply that would follow that example.
 - Do not provide correction feedback for the generated example.
-${metadataInstructions}
+${
+  context.dictionaryEnabled
+    ? "- Also provide exampleWords for exampleMessage and replyWords for reply, using dictionary lemmas/headwords and concise part-of-speech labels."
+    : ""
+}
 `.trim();
 
 }
@@ -3037,7 +3193,7 @@ function extractLearnerVocabulary(
   language
 ) {
 
-  const vocabularyByLemma =
+  const byLemma =
     new Map();
 
 
@@ -3065,7 +3221,7 @@ function extractLearnerVocabulary(
 
 
     const existing =
-      vocabularyByLemma.get(
+      byLemma.get(
         item.lemma_key
       );
 
@@ -3074,7 +3230,7 @@ function extractLearnerVocabulary(
       !existing
     ) {
 
-      vocabularyByLemma.set(
+      byLemma.set(
         item.lemma_key,
         item
       );
@@ -3096,7 +3252,7 @@ function extractLearnerVocabulary(
         "other"
     ) {
 
-      vocabularyByLemma.set(
+      byLemma.set(
         item.lemma_key,
         {
 
@@ -3114,14 +3270,14 @@ function extractLearnerVocabulary(
 
 
   return [
-    ...vocabularyByLemma.values(),
+    ...byLemma.values(),
   ];
 
 }
 
 
 // ---------------------------------------------------------
-// Vocabulary-test helpers
+// Vocabulary test helpers
 // ---------------------------------------------------------
 
 
@@ -3759,15 +3915,7 @@ async function chooseNewVocabularyWithAI(
 
 
     if (
-      !item
-    ) {
-
-      continue;
-
-    }
-
-
-    if (
+      !item ||
       knownKeys.has(
         item.lemmaKey
       ) ||
@@ -3809,12 +3957,6 @@ function addMultipleChoiceOptions(
         item
       ) =>
         item.primaryLemma
-    );
-
-
-  const dictionaryContext =
-    dictionaries.get(
-      language.id
     );
 
 
@@ -3860,23 +4002,22 @@ function addMultipleChoiceOptions(
     }
 
 
-    let extraAttempts =
+    let attempts =
       0;
 
 
     while (
       options.size <
         4 &&
-      dictionaryContext &&
-      extraAttempts <
+      attempts <
         30
     ) {
 
-      extraAttempts +=
+      attempts +=
         1;
 
 
-      const extras =
+      const extra =
         getRandomDictionaryTestItems(
           language,
           1
@@ -3884,7 +4025,7 @@ function addMultipleChoiceOptions(
 
 
       if (
-        !extras.length
+        !extra.length
       ) {
 
         break;
@@ -3893,7 +4034,7 @@ function addMultipleChoiceOptions(
 
 
       options.add(
-        extras[
+        extra[
           0
         ].primaryLemma
       );
@@ -3947,7 +4088,7 @@ function cleanupVocabTestSessions() {
 
 
 // ---------------------------------------------------------
-// OpenAI helper
+// OpenAI helpers
 // ---------------------------------------------------------
 
 
@@ -4105,6 +4246,7 @@ async function createStructuredResponse({
     console.error(
       "Could not parse structured AI output",
       {
+
         message:
           error?.message,
 
@@ -4113,6 +4255,7 @@ async function createStructuredResponse({
             0,
             500
           ),
+
       }
     );
 
@@ -4338,7 +4481,7 @@ app.use(
 
 
 // ---------------------------------------------------------
-// Basic / auth / config
+// Basic routes
 // ---------------------------------------------------------
 
 
@@ -4370,14 +4513,14 @@ app.get(
     res
   ) => {
 
-    const authorizationHeader =
+    const header =
       getAuthorizationHeader(
         req
       );
 
 
     if (
-      !authorizationHeader
+      !header
     ) {
 
       return res.json({
@@ -4395,7 +4538,7 @@ app.get(
 
     const accessToken =
       getBearerToken(
-        authorizationHeader
+        header
       );
 
 
@@ -4858,7 +5001,7 @@ app.get(
 
 
 // ---------------------------------------------------------
-// Vocabulary stats
+// Vocabulary stats + total chat time
 // ---------------------------------------------------------
 
 
@@ -4981,6 +5124,18 @@ app.get(
       }
 
 
+      const totalChatSeconds =
+        await fetchOwnTotalChatSeconds({
+
+          accessToken:
+            auth.accessToken,
+
+          userId:
+            auth.user.id,
+
+        });
+
+
       const counts =
         new Map();
 
@@ -5008,6 +5163,8 @@ app.get(
 
         overallTotal:
           rows.length,
+
+        totalChatSeconds,
 
         languages:
           Object.values(
@@ -5142,6 +5299,7 @@ app.post(
           input: [
 
             {
+
               role:
                 "system",
 
@@ -5149,14 +5307,17 @@ app.post(
                 buildCustomOpeningPrompt(
                   context
                 ),
+
             },
 
             {
+
               role:
                 "user",
 
               content:
                 "Begin the role-play now.",
+
             },
 
           ],
@@ -5319,6 +5480,7 @@ app.post(
     const input = [
 
       {
+
         role:
           "system",
 
@@ -5326,16 +5488,19 @@ app.post(
           buildSystemPrompt(
             context
           ),
+
       },
 
       ...historyResult.history,
 
       {
+
         role:
           "user",
 
         content:
           message.trim(),
+
       },
 
     ];
@@ -5354,7 +5519,8 @@ app.post(
           360,
           Math.round(
             Number(
-              req.body?.chatSecondsSinceLastMessage
+              req.body
+                ?.chatSecondsSinceLastMessage
             ) ||
             0
           )
@@ -5408,6 +5574,7 @@ app.post(
             ) {
 
               tasks.push(
+
                 recordChatSeconds(
                   user.id,
                   chatSeconds
@@ -5431,13 +5598,15 @@ app.post(
 
                   }
                 )
+
               );
 
             }
 
 
             if (
-              parsed.feedback?.hasIssues ===
+              parsed.feedback
+                ?.hasIssues ===
                 false &&
               context.dictionaryEnabled
             ) {
@@ -5454,6 +5623,7 @@ app.post(
               ) {
 
                 tasks.push(
+
                   recordVocabularySuccesses({
 
                     userId:
@@ -5485,6 +5655,7 @@ app.post(
 
                     }
                   )
+
                 );
 
               }
@@ -5506,8 +5677,10 @@ app.post(
             console.error(
               "Optional learner-stat persistence failed",
               {
+
                 message:
                   error?.message,
+
               }
             );
 
@@ -5617,6 +5790,7 @@ app.post(
     const input = [
 
       {
+
         role:
           "system",
 
@@ -5624,16 +5798,19 @@ app.post(
           buildExamplePrompt(
             context
           ),
+
       },
 
       ...historyResult.history,
 
       {
+
         role:
           "user",
 
         content:
           "Generate the learner's next example response and then continue the role-play as specified.",
+
       },
 
     ];
@@ -6017,8 +6194,10 @@ app.post(
                 row.lemma,
                 language,
                 {
+
                   preferStoredLemma:
                     true,
+
                 }
               );
 
@@ -6225,7 +6404,9 @@ app.post(
 
         savesCorrectAnswers:
           Boolean(
-            authenticatedUser
+            authenticatedUser &&
+            quizMode ===
+              "hardcore"
           ),
 
         questions:
@@ -6355,14 +6536,14 @@ app.post(
     }
 
 
-    const session =
+    const testSession =
       vocabTestSessions.get(
         testId
       );
 
 
     if (
-      !session
+      !testSession
     ) {
 
       return res
@@ -6380,7 +6561,7 @@ app.post(
 
 
     if (
-      session.userId
+      testSession.userId
     ) {
 
       const auth =
@@ -6401,7 +6582,7 @@ app.post(
 
       if (
         auth.user.id !==
-        session.userId
+        testSession.userId
       ) {
 
         return res
@@ -6421,7 +6602,7 @@ app.post(
 
 
     const question =
-      session.questions.find(
+      testSession.questions.find(
         (
           item
         ) =>
@@ -6491,102 +6672,104 @@ app.post(
     let recorded =
       false;
 
-   /*
-  Only Hardcore-mode recall counts as persistent
-  positive vocabulary evidence.
 
-  Multiple-choice answers affect the current quiz score
-  only. They do not add vocabulary and do not increment
-  correct_test_count.
-*/
+    /*
+      Multiple-choice answers affect only the current score.
 
-if (
-  correct &&
-  session.userId &&
-  session.quizMode ===
-    "hardcore"
-) {
+      Only a correct Hardcore answer becomes persistent
+      vocabulary evidence.
+    */
 
-  const language =
-    getLanguage(
-      session.languageId
-    );
+    if (
+      correct &&
+      testSession.userId &&
+      testSession.quizMode ===
+        "hardcore"
+    ) {
 
-
-  const lemmaToRecord =
-    matchingAnswer;
+      const language =
+        getLanguage(
+          testSession.languageId
+        );
 
 
-  const resolved =
-    resolveTestItemFromWord(
-      lemmaToRecord,
-      language,
-      {
-        preferStoredLemma:
-          true,
-      }
-    );
+      const lemmaToRecord =
+        matchingAnswer;
 
 
-  try {
-
-    await recordVocabularyTestSuccess({
-
-      userId:
-        session.userId,
-
-      languageId:
-        session.languageId,
-
-      lemma:
-        lemmaToRecord,
-
-      lemmaKey:
-        normalizeWord(
+      const resolved =
+        resolveTestItemFromWord(
           lemmaToRecord,
-          language
-        ),
+          language,
+          {
 
-      partOfSpeech:
-        resolved?.partOfSpeech ||
-        question.partOfSpeech ||
-        null,
+            preferStoredLemma:
+              true,
 
-    });
+          }
+        );
 
 
-    recorded =
-      true;
+      try {
 
-  } catch (
-    error
-  ) {
+        await recordVocabularyTestSuccess({
 
-    console.error(
-      "Hardcore vocabulary-test success persistence failed",
-      {
+          userId:
+            testSession.userId,
 
-        userId:
-          session.userId,
+          languageId:
+            testSession.languageId,
 
-        language:
-          session.languageId,
+          lemma:
+            lemmaToRecord,
 
-        lemma:
-          lemmaToRecord,
+          lemmaKey:
+            normalizeWord(
+              lemmaToRecord,
+              language
+            ),
 
-        message:
-          error?.message,
+          partOfSpeech:
+            resolved?.partOfSpeech ||
+            question.partOfSpeech ||
+            null,
+
+        });
+
+
+        recorded =
+          true;
+
+      } catch (
+        error
+      ) {
+
+        console.error(
+          "Hardcore vocabulary-test success persistence failed",
+          {
+
+            userId:
+              testSession.userId,
+
+            language:
+              testSession.languageId,
+
+            lemma:
+              lemmaToRecord,
+
+            message:
+              error?.message,
+
+          }
+        );
 
       }
-    );
 
-  }
+    }
 
-}
 
     const allAnswered =
-      session.questions.every(
+      testSession.questions.every(
         (
           item
         ) =>
@@ -6662,8 +6845,10 @@ app.use(
     console.error(
       "Unexpected server error",
       {
+
         message:
           err?.message,
+
       }
     );
 
