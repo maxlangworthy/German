@@ -117,7 +117,7 @@ const openai =
 
 
 // ---------------------------------------------------------
-// Supabase authentication
+// Supabase authentication + vocabulary storage
 // ---------------------------------------------------------
 
 
@@ -138,6 +138,31 @@ const SUPABASE_PUBLISHABLE_KEY =
     process.env.SUPABASE_PUBLISHABLE_KEY ||
     ""
   ).trim();
+
+
+const SUPABASE_SECRET_KEY =
+  String(
+    process.env.SUPABASE_SECRET_KEY ||
+    ""
+  ).trim();
+
+
+const SUPABASE_DATABASE_CONFIGURED =
+  Boolean(
+    SUPABASE_URL &&
+    SUPABASE_SECRET_KEY
+  );
+
+
+if (
+  !SUPABASE_DATABASE_CONFIGURED
+) {
+
+  console.warn(
+    "Supabase vocabulary storage is not configured. Vocabulary statistics will not be saved."
+  );
+
+}
 
 
 const SUPABASE_AUTH_CONFIGURED =
@@ -415,6 +440,336 @@ async function verifySupabaseAccessToken(
     },
 
   };
+
+}
+
+
+async function getOptionalAuthenticatedUser(
+  req
+) {
+
+  const authorizationHeader =
+    getAuthorizationHeader(
+      req
+    );
+
+
+  if (
+    !authorizationHeader
+  ) {
+
+    return null;
+
+  }
+
+
+  const accessToken =
+    getBearerToken(
+      authorizationHeader
+    );
+
+
+  if (
+    !accessToken
+  ) {
+
+    console.warn(
+      "Ignoring malformed optional Authorization header on chat request."
+    );
+
+
+    return null;
+
+  }
+
+
+  const verification =
+    await verifySupabaseAccessToken(
+      accessToken
+    );
+
+
+  if (
+    verification.status !==
+      "authenticated"
+  ) {
+
+    if (
+      verification.status ===
+        "invalid"
+    ) {
+
+      console.warn(
+        "Ignoring invalid or expired optional Supabase access token on chat request."
+      );
+
+    }
+
+
+    return null;
+
+  }
+
+
+  return verification.user;
+
+}
+
+
+async function recordVocabularySuccesses({
+  userId,
+  languageId,
+  items,
+}) {
+
+  if (
+    !SUPABASE_DATABASE_CONFIGURED ||
+    !Array.isArray(
+      items
+    ) ||
+    items.length ===
+      0
+  ) {
+
+    return;
+
+  }
+
+
+  const response =
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/rpc/record_vocabulary_successes`,
+      {
+
+        method:
+          "POST",
+
+        headers: {
+
+          apikey:
+            SUPABASE_SECRET_KEY,
+
+          "Content-Type":
+            "application/json",
+
+          Accept:
+            "application/json",
+
+        },
+
+        body:
+          JSON.stringify({
+
+            p_user_id:
+              userId,
+
+            p_language:
+              languageId,
+
+            p_items:
+              items,
+
+          }),
+
+        signal:
+          AbortSignal.timeout(
+            5000
+          ),
+
+      }
+    );
+
+
+  if (
+    !response.ok
+  ) {
+
+    let detail =
+      "";
+
+
+    try {
+
+      detail =
+        (
+          await response.text()
+        ).slice(
+          0,
+          500
+        );
+
+    } catch {
+
+      detail =
+        "";
+
+    }
+
+
+    throw new Error(
+      `Supabase vocabulary write failed with status ${response.status}${detail ? `: ${detail}` : ""}`
+    );
+
+  }
+
+}
+
+
+async function fetchOwnVocabularyRows({
+  accessToken,
+  userId,
+  languageId =
+    null,
+}) {
+
+  const pageSize =
+    1000;
+
+
+  const allRows =
+    [];
+
+
+  let offset =
+    0;
+
+
+  while (
+    true
+  ) {
+
+    const params =
+      new URLSearchParams();
+
+
+    params.set(
+      "select",
+      "language,lemma"
+    );
+
+
+    params.set(
+      "user_id",
+      `eq.${userId}`
+    );
+
+
+    if (
+      languageId
+    ) {
+
+      params.set(
+        "language",
+        `eq.${languageId}`
+      );
+
+    }
+
+
+    params.set(
+      "order",
+      languageId
+        ? "lemma.asc"
+        : "language.asc,lemma.asc"
+    );
+
+
+    params.set(
+      "limit",
+      String(
+        pageSize
+      )
+    );
+
+
+    params.set(
+      "offset",
+      String(
+        offset
+      )
+    );
+
+
+    const response =
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/vocabulary?${params.toString()}`,
+        {
+
+          method:
+            "GET",
+
+          headers: {
+
+            apikey:
+              SUPABASE_PUBLISHABLE_KEY,
+
+            Authorization:
+              `Bearer ${accessToken}`,
+
+            Accept:
+              "application/json",
+
+          },
+
+          signal:
+            AbortSignal.timeout(
+              5000
+            ),
+
+        }
+      );
+
+
+    if (
+      !response.ok
+    ) {
+
+      throw new Error(
+        `Supabase vocabulary read failed with status ${response.status}`
+      );
+
+    }
+
+
+    const rows =
+      await response.json();
+
+
+    if (
+      !Array.isArray(
+        rows
+      )
+    ) {
+
+      throw new Error(
+        "Supabase vocabulary read returned an invalid response."
+      );
+
+    }
+
+
+    allRows.push(
+      ...rows
+    );
+
+
+    if (
+      rows.length <
+      pageSize
+    ) {
+
+      break;
+
+    }
+
+
+    offset +=
+      pageSize;
+
+  }
+
+
+  return allRows;
 
 }
 
@@ -2353,6 +2708,349 @@ function alignWordMetadata(
 
 
 // ---------------------------------------------------------
+// Learner vocabulary extraction
+// ---------------------------------------------------------
+
+
+function resolveLearnerVocabularyItem(
+  surfaceWord,
+  language
+) {
+
+  const dictionaryContext =
+    dictionaries.get(
+      language.id
+    );
+
+
+  if (
+    !dictionaryContext
+  ) {
+
+    return null;
+
+  }
+
+
+  const word =
+    cleanLookupWord(
+      surfaceWord
+    );
+
+
+  if (
+    !word
+  ) {
+
+    return null;
+
+  }
+
+
+  const rows =
+    dictionaryContext
+      .lookup
+      .all(
+        normalizeWord(
+          word,
+          language
+        )
+      );
+
+
+  if (
+    rows.length ===
+      0
+  ) {
+
+    return null;
+
+  }
+
+
+  /*
+    Prefer a dictionary row whose stored spelling exactly
+    matches what the learner typed, then fall back to the
+    dictionary's normal ordering.
+  */
+
+  const orderedRows = [
+
+    ...rows.filter(
+      (
+        row
+      ) =>
+        row.word ===
+        word
+    ),
+
+    ...rows.filter(
+      (
+        row
+      ) =>
+        row.word !==
+        word
+    ),
+
+  ];
+
+
+  const row =
+    orderedRows[
+      0
+    ];
+
+
+  const lemmas =
+    parseJsonArray(
+      row.lemmas
+    )
+      .filter(
+        (
+          lemma
+        ) =>
+          typeof lemma ===
+            "string" &&
+          lemma.trim()
+      )
+      .map(
+        (
+          lemma
+        ) =>
+          lemma.trim()
+      );
+
+
+  let lemma =
+    lemmas[
+      0
+    ] ||
+    String(
+      row.word ||
+      word
+    ).trim();
+
+
+  let partOfSpeech =
+    typeof row.pos ===
+      "string" &&
+    row.pos.trim()
+      ? row.pos.trim()
+      : null;
+
+
+  /*
+    If the current word is an inflected form, look up its
+    lemma once in the same local dictionary so that we retain
+    canonical spelling and useful part-of-speech metadata.
+  */
+
+  if (
+    lemmas.length >
+    0
+  ) {
+
+    const lemmaRows =
+      dictionaryContext
+        .lookup
+        .all(
+          normalizeWord(
+            lemma,
+            language
+          )
+        );
+
+
+    const preferredLemmaRow =
+      lemmaRows.find(
+        (
+          item
+        ) =>
+          item.word ===
+            lemma &&
+          item.pos ===
+            row.pos
+      ) ||
+      lemmaRows.find(
+        (
+          item
+        ) =>
+          item.pos ===
+            row.pos
+      ) ||
+      lemmaRows.find(
+        (
+          item
+        ) =>
+          item.word ===
+            lemma
+      ) ||
+      lemmaRows[
+        0
+      ];
+
+
+    if (
+      preferredLemmaRow
+    ) {
+
+      if (
+        typeof preferredLemmaRow.word ===
+          "string" &&
+        preferredLemmaRow.word.trim()
+      ) {
+
+        lemma =
+          preferredLemmaRow.word.trim();
+
+      }
+
+
+      if (
+        typeof preferredLemmaRow.pos ===
+          "string" &&
+        preferredLemmaRow.pos.trim()
+      ) {
+
+        partOfSpeech =
+          preferredLemmaRow.pos.trim();
+
+      }
+
+    }
+
+  }
+
+
+  if (
+    !lemma
+  ) {
+
+    return null;
+
+  }
+
+
+  return {
+
+    lemma,
+
+    lemma_key:
+      normalizeWord(
+        lemma,
+        language
+      ),
+
+    part_of_speech:
+      partOfSpeech &&
+      partOfSpeech !==
+        "unknown"
+          ? partOfSpeech
+          : null,
+
+  };
+
+}
+
+
+function extractLearnerVocabulary(
+  message,
+  language
+) {
+
+  const vocabularyByLemma =
+    new Map();
+
+
+  const words =
+    extractWordTokens(
+      message
+    );
+
+
+  for (
+    const word
+    of words
+  ) {
+
+    const item =
+      resolveLearnerVocabularyItem(
+        word,
+        language
+      );
+
+
+    if (
+      !item
+    ) {
+
+      continue;
+
+    }
+
+
+    const existing =
+      vocabularyByLemma.get(
+        item.lemma_key
+      );
+
+
+    if (
+      !existing
+    ) {
+
+      vocabularyByLemma.set(
+        item.lemma_key,
+        item
+      );
+
+
+      continue;
+
+    }
+
+
+    /*
+      If a duplicate occurrence gives us better POS metadata,
+      retain it without creating another successful-use mark.
+    */
+
+    if (
+      (
+        !existing.part_of_speech ||
+        existing.part_of_speech ===
+          "other"
+      ) &&
+      item.part_of_speech &&
+      item.part_of_speech !==
+        "other"
+    ) {
+
+      vocabularyByLemma.set(
+        item.lemma_key,
+        {
+
+          ...existing,
+
+          part_of_speech:
+            item.part_of_speech,
+
+        }
+      );
+
+    }
+
+  }
+
+
+  return [
+    ...vocabularyByLemma.values(),
+  ];
+
+}
+
+
+// ---------------------------------------------------------
 // OpenAI request helpers
 // ---------------------------------------------------------
 
@@ -2857,6 +3555,284 @@ app.get(
 
 
 // ---------------------------------------------------------
+// Vocabulary statistics
+// ---------------------------------------------------------
+
+
+app.get(
+  "/api/vocabulary",
+  async (
+    req,
+    res
+  ) => {
+
+    const authorizationHeader =
+      getAuthorizationHeader(
+        req
+      );
+
+
+    const accessToken =
+      getBearerToken(
+        authorizationHeader
+      );
+
+
+    if (
+      !accessToken
+    ) {
+
+      return res
+        .status(
+          401
+        )
+        .json({
+
+          error:
+            "Authentication is required to view vocabulary statistics.",
+
+        });
+
+    }
+
+
+    const verification =
+      await verifySupabaseAccessToken(
+        accessToken
+      );
+
+
+    if (
+      verification.status ===
+        "invalid"
+    ) {
+
+      return res
+        .status(
+          401
+        )
+        .json({
+
+          error:
+            "The Supabase access token is invalid or expired.",
+
+        });
+
+    }
+
+
+    if (
+      verification.status ===
+        "unavailable"
+    ) {
+
+      return res
+        .status(
+          503
+        )
+        .json({
+
+          error:
+            "Authentication verification is temporarily unavailable.",
+
+        });
+
+    }
+
+
+    const requestedLanguageId =
+      String(
+        req.query.language ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
+
+
+    let requestedLanguage =
+      null;
+
+
+    if (
+      requestedLanguageId
+    ) {
+
+      requestedLanguage =
+        getLanguage(
+          requestedLanguageId
+        );
+
+
+      if (
+        !requestedLanguage
+      ) {
+
+        return res
+          .status(
+            400
+          )
+          .json({
+
+            error:
+              "Unknown language.",
+
+          });
+
+      }
+
+    }
+
+
+    try {
+
+      const rows =
+        await fetchOwnVocabularyRows({
+
+          accessToken,
+
+          userId:
+            verification.user.id,
+
+          languageId:
+            requestedLanguage
+              ?.id ||
+            null,
+
+        });
+
+
+      if (
+        requestedLanguage
+      ) {
+
+        return res.json({
+
+          language: {
+
+            id:
+              requestedLanguage.id,
+
+            name:
+              requestedLanguage.name,
+
+          },
+
+          count:
+            rows.length,
+
+          items:
+            rows.map(
+              (
+                row
+              ) =>
+                row.lemma
+            ),
+
+        });
+
+      }
+
+
+      const counts =
+        new Map();
+
+
+      for (
+        const row
+        of rows
+      ) {
+
+        counts.set(
+          row.language,
+          (
+            counts.get(
+              row.language
+            ) ||
+            0
+          ) +
+          1
+        );
+
+      }
+
+
+      const languages =
+        Object.values(
+          LANGUAGES
+        )
+          .filter(
+            (
+              language
+            ) =>
+              counts.has(
+                language.id
+              )
+          )
+          .map(
+            (
+              language
+            ) => ({
+
+              id:
+                language.id,
+
+              name:
+                language.name,
+
+              count:
+                counts.get(
+                  language.id
+                ),
+
+            })
+          );
+
+
+      return res.json({
+
+        overallTotal:
+          rows.length,
+
+        languages,
+
+      });
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "Vocabulary statistics read failed",
+        {
+
+          userId:
+            verification.user.id,
+
+          message:
+            error?.message,
+
+        }
+      );
+
+
+      return res
+        .status(
+          503
+        )
+        .json({
+
+          error:
+            "Vocabulary statistics are temporarily unavailable.",
+
+        });
+
+    }
+
+  }
+);
+
+
+// ---------------------------------------------------------
 // Health
 // ---------------------------------------------------------
 
@@ -2910,6 +3886,11 @@ app.get(
 
       status:
         "ok",
+
+      vocabularyStorage:
+        SUPABASE_DATABASE_CONFIGURED
+          ? "configured"
+          : "unavailable",
 
       dictionaries:
         dictionaryStatus,
@@ -3214,11 +4195,13 @@ app.get(
       console.error(
         "Dictionary lookup failed",
         {
+
           language:
             language.id,
 
           message:
             error?.message,
+
         }
       );
 
@@ -3268,8 +4251,10 @@ app.post(
           400
         )
         .json({
+
           error:
             context.error,
+
         });
 
     }
@@ -3405,8 +4390,10 @@ app.post(
           400
         )
         .json({
+
           error:
             context.error,
+
         });
 
     }
@@ -3508,6 +4495,26 @@ app.post(
     ];
 
 
+    /*
+      Authentication is deliberately optional on /api/chat.
+
+      No access token:
+        normal anonymous chat, no vocabulary saved.
+
+      Valid access token:
+        chat works normally and qualifying vocabulary may be
+        associated with the verified Supabase UUID.
+
+      Invalid/unavailable optional authentication:
+        chat still works, but vocabulary is not saved.
+    */
+
+    const optionalUserPromise =
+      getOptionalAuthenticatedUser(
+        req
+      );
+
+
     try {
 
       const parsed =
@@ -3530,6 +4537,107 @@ app.post(
             1000,
 
         });
+
+
+      /*
+        Vocabulary success rule:
+
+        - must be an authenticated learner
+        - current language must use the existing local dictionary
+        - the learner's newest message must have zero corrections
+
+        We use the structured hasIssues boolean, not the visible
+        "No correction needed." wording.
+      */
+
+      if (
+        parsed.feedback
+          ?.hasIssues ===
+            false &&
+        context.dictionaryEnabled
+      ) {
+
+        const learnerMessage =
+          message.trim();
+
+
+        /*
+          Do not block the learner's normal chat response while
+          vocabulary storage completes.
+
+          If Supabase persistence fails, the conversation still
+          succeeds and the error is logged server-side.
+        */
+
+        void optionalUserPromise
+          .then(
+            async (
+              user
+            ) => {
+
+              if (
+                !user
+              ) {
+
+                return;
+
+              }
+
+
+              const vocabularyItems =
+                extractLearnerVocabulary(
+                  learnerMessage,
+                  context.language
+                );
+
+
+              if (
+                vocabularyItems.length ===
+                  0
+              ) {
+
+                return;
+
+              }
+
+
+              await recordVocabularySuccesses({
+
+                userId:
+                  user.id,
+
+                languageId:
+                  context.language.id,
+
+                items:
+                  vocabularyItems,
+
+              });
+
+            }
+          )
+          .catch(
+            (
+              error
+            ) => {
+
+              console.error(
+                "Vocabulary persistence failed",
+                {
+
+                  language:
+                    context.language.id,
+
+                  message:
+                    error?.message,
+
+                }
+              );
+
+            }
+          );
+
+      }
 
 
       return res.json({
@@ -3598,8 +4706,10 @@ app.post(
           400
         )
         .json({
+
           error:
             context.error,
+
         });
 
     }
@@ -3677,6 +4787,11 @@ app.post(
 
         });
 
+
+      /*
+        Generated examples intentionally do not count towards
+        learner vocabulary statistics.
+      */
 
       return res.json({
 
