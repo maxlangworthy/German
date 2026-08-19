@@ -2847,6 +2847,79 @@ false,
 }
 
 
+function makeEnglishVocabularyItemsSchema(
+itemCount
+) {
+
+return {
+
+type:
+"object",
+
+properties: {
+
+items: {
+
+type:
+"array",
+
+minItems:
+itemCount,
+
+maxItems:
+itemCount,
+
+items: {
+
+type:
+"object",
+
+properties: {
+
+word: {
+type:
+"string",
+},
+
+definition: {
+type:
+"string",
+},
+
+partOfSpeech: {
+type:
+"string",
+},
+
+},
+
+required: [
+"word",
+"definition",
+"partOfSpeech",
+],
+
+additionalProperties:
+false,
+
+},
+
+},
+
+},
+
+required: [
+"items",
+],
+
+additionalProperties:
+false,
+
+};
+
+}
+
+
 // ---------------------------------------------------------
 // Conversation validation / prompts
 // ---------------------------------------------------------
@@ -3035,6 +3108,19 @@ if (
 return {
 error:
 "Unknown language.",
+};
+
+}
+
+
+if (
+language.vocabTestOnly ===
+true
+) {
+
+return {
+error:
+`${language.name} is available for vocabulary tests only.`,
 };
 
 }
@@ -4426,6 +4512,576 @@ return items;
 }
 
 
+function isUsableEnglishTestWord(
+value
+) {
+
+const word =
+String(
+value ||
+""
+)
+.normalize(
+"NFC"
+)
+.trim();
+
+
+if (
+!word ||
+word.length >
+80 ||
+/\s/u.test(
+word
+) ||
+!/^[\p{L}][\p{L}'’\-]*$/u.test(
+word
+)
+) {
+
+return null;
+
+}
+
+
+return word;
+
+}
+
+
+function makeEnglishTestItem(
+rawItem,
+language,
+forcedWord =
+null
+) {
+
+if (
+!rawItem ||
+typeof rawItem !==
+"object"
+) {
+
+return null;
+
+}
+
+
+const generatedWord =
+isUsableEnglishTestWord(
+rawItem.word
+);
+
+
+const word =
+forcedWord
+? isUsableEnglishTestWord(
+forcedWord
+)
+: generatedWord;
+
+
+const definition =
+String(
+rawItem.definition ||
+""
+)
+.trim();
+
+
+if (
+!word ||
+!generatedWord ||
+!definition ||
+definition.length >
+400
+) {
+
+return null;
+
+}
+
+
+const partOfSpeech =
+String(
+rawItem.partOfSpeech ||
+""
+)
+.trim();
+
+
+return {
+
+prompt:
+definition,
+
+primaryLemma:
+word,
+
+acceptedAnswers: [
+word,
+],
+
+lemmaKey:
+normalizeWord(
+word,
+language
+),
+
+partOfSpeech:
+partOfSpeech &&
+partOfSpeech !==
+"unknown"
+? partOfSpeech
+: null,
+
+};
+
+}
+
+
+async function createEnglishVocabularyTestItems({
+language,
+sourceMode,
+knownRows,
+requestedWords,
+count,
+quizMode,
+}) {
+
+const extraCount =
+quizMode ===
+"multiple_choice"
+? 8
+: 0;
+
+
+const itemCount =
+count +
+extraCount;
+
+
+const known =
+knownRows
+.map(
+row =>
+String(
+row.lemma ||
+""
+).trim()
+)
+.filter(
+Boolean
+);
+
+
+let task;
+
+
+if (
+sourceMode ===
+"my_vocab"
+) {
+
+task =
+`The learner must be tested on these exact ${count} English vocabulary words:
+${JSON.stringify(requestedWords)}
+
+Return one item for every supplied word, preserving each supplied word exactly in the word field. Give each word one clear, concise dictionary-style English definition and a concise part-of-speech label. Then return ${extraCount} additional useful English single-word headwords to act only as multiple-choice distractors. The additional words must not duplicate the supplied words.`;
+
+} else if (
+sourceMode ===
+"new_vocab"
+) {
+
+task =
+`Choose ${itemCount} useful English single-word dictionary headwords. The first ${count} will be tested as new vocabulary and the remaining ${extraCount} will only be available as multiple-choice distractors. Do not use anything in the learner's currently recorded vocabulary:
+${JSON.stringify(known)}`;
+
+} else {
+
+task =
+`Choose ${itemCount} varied, useful English single-word dictionary headwords for a general vocabulary test. The first ${count} will be tested and the remaining ${extraCount} will only be available as multiple-choice distractors.`;
+
+}
+
+
+const parsed =
+await createStructuredResponse({
+
+input: [
+
+{
+
+role:
+"system",
+
+content:
+`You create high-quality English vocabulary-definition questions for PlainBetter.
+- Use standard contemporary English.
+- Each item must contain one single-word dictionary headword, one concise English definition, and a concise part-of-speech label.
+- Definitions must identify the intended word clearly without using the answer itself or an obvious inflected form of it.
+- Avoid proper nouns, abbreviations, phrases, archaic terms, rare dialect words, specialist jargon, offensive terms, and implausibly obscure dictionary entries.
+- Prefer words that are genuinely useful to an English learner, ranging from everyday vocabulary to moderately challenging educated vocabulary.
+- Do not repeat words.
+- Use lower-case headwords unless standard English spelling genuinely requires otherwise.`,
+
+},
+
+{
+
+role:
+"user",
+
+content:
+task,
+
+},
+
+],
+
+schema:
+makeEnglishVocabularyItemsSchema(
+itemCount
+),
+
+schemaName:
+"plainbetter_english_vocabulary_test",
+
+maxOutputTokens:
+3200,
+
+});
+
+
+const rawItems =
+Array.isArray(
+parsed.items
+)
+? parsed.items
+: [];
+
+
+const selected =
+[];
+
+
+const distractors =
+[];
+
+
+const usedKeys =
+new Set();
+
+
+if (
+sourceMode ===
+"my_vocab"
+) {
+
+const byGeneratedWord =
+new Map();
+
+
+for (
+const rawItem
+of rawItems
+) {
+
+const generatedWord =
+isUsableEnglishTestWord(
+rawItem?.word
+);
+
+
+if (
+!generatedWord
+) {
+
+continue;
+
+}
+
+
+const key =
+normalizeWord(
+generatedWord,
+language
+);
+
+
+if (
+!byGeneratedWord.has(
+key
+)
+) {
+
+byGeneratedWord.set(
+key,
+rawItem
+);
+
+}
+
+}
+
+
+for (
+const requestedWord
+of requestedWords
+) {
+
+const key =
+normalizeWord(
+requestedWord,
+language
+);
+
+
+const rawItem =
+byGeneratedWord.get(
+key
+);
+
+
+const item =
+makeEnglishTestItem(
+rawItem,
+language,
+requestedWord
+);
+
+
+if (
+!item ||
+usedKeys.has(
+item.lemmaKey
+)
+) {
+
+continue;
+
+}
+
+
+usedKeys.add(
+item.lemmaKey
+);
+
+
+selected.push(
+item
+);
+
+}
+
+
+for (
+const rawItem
+of rawItems
+) {
+
+const item =
+makeEnglishTestItem(
+rawItem,
+language
+);
+
+
+if (
+!item ||
+usedKeys.has(
+item.lemmaKey
+)
+) {
+
+continue;
+
+}
+
+
+usedKeys.add(
+item.lemmaKey
+);
+
+
+distractors.push(
+item
+);
+
+}
+
+
+return {
+selected,
+distractors,
+};
+
+}
+
+
+const knownKeys =
+new Set(
+knownRows.map(
+row =>
+normalizeWord(
+row.lemma_key ||
+row.lemma,
+language
+)
+)
+);
+
+
+for (
+const rawItem
+of rawItems
+) {
+
+const item =
+makeEnglishTestItem(
+rawItem,
+language
+);
+
+
+if (
+!item ||
+usedKeys.has(
+item.lemmaKey
+) ||
+(
+sourceMode ===
+"new_vocab" &&
+knownKeys.has(
+item.lemmaKey
+)
+)
+) {
+
+continue;
+
+}
+
+
+usedKeys.add(
+item.lemmaKey
+);
+
+
+if (
+selected.length <
+count
+) {
+
+selected.push(
+item
+);
+
+} else {
+
+distractors.push(
+item
+);
+
+}
+
+}
+
+
+return {
+selected,
+distractors,
+};
+
+}
+
+
+function addEnglishMultipleChoiceOptions(
+items,
+distractorItems =
+[]
+) {
+
+const pool =
+[
+...items,
+...distractorItems,
+]
+.map(
+item =>
+item.primaryLemma
+)
+.filter(
+Boolean
+);
+
+
+for (
+const item
+of items
+) {
+
+const options =
+new Set([
+item.primaryLemma,
+]);
+
+
+for (
+const candidate
+of shuffle(
+pool
+)
+) {
+
+if (
+options.size >=
+4
+) {
+
+break;
+
+}
+
+
+if (
+candidate !==
+item.primaryLemma
+) {
+
+options.add(
+candidate
+);
+
+}
+
+}
+
+
+if (
+options.size <
+4
+) {
+
+return false;
+
+}
+
+
+item.options =
+shuffle([
+...options,
+]);
+
+}
+
+
+return true;
+
+}
+
+
 async function chooseNewVocabularyWithAI(
 language,
 knownRows,
@@ -5395,6 +6051,10 @@ language
 dictionaries.has(
 language.id
 ),
+
+vocabTestOnly:
+language.vocabTestOnly ===
+true,
 
 })
 ),
@@ -6794,12 +7454,22 @@ error:
 }
 
 
+const isEnglishVocabularyTest =
+language.id ===
+"english" &&
+language.vocabTestOnly ===
+true;
+
+
 if (
+!isEnglishVocabularyTest &&
+(
 !languageHasDictionary(
 language
 ) ||
 !dictionaries.has(
 language.id
+)
 )
 ) {
 
@@ -7007,7 +7677,212 @@ let knownRows =
 [];
 
 
+let englishDistractors =
+[];
+
+
 if (
+isEnglishVocabularyTest
+) {
+
+let requestedWords =
+[];
+
+
+if (
+sourceMode !==
+"random"
+) {
+
+knownRows =
+await fetchOwnVocabularyRows({
+
+accessToken:
+verifiedAccessToken,
+
+userId:
+authenticatedUser.id,
+
+languageId:
+language.id,
+
+});
+
+}
+
+
+if (
+sourceMode ===
+"my_vocab"
+) {
+
+const seen =
+new Set();
+
+
+for (
+const row
+of shuffle(
+knownRows
+)
+) {
+
+const word =
+isUsableEnglishTestWord(
+row.lemma
+);
+
+
+if (
+!word
+) {
+
+continue;
+
+}
+
+
+const key =
+normalizeWord(
+word,
+language
+);
+
+
+if (
+seen.has(
+key
+)
+) {
+
+continue;
+
+}
+
+
+seen.add(
+key
+);
+
+
+requestedWords.push(
+word
+);
+
+
+if (
+requestedWords.length >=
+count
+) {
+
+break;
+
+}
+
+}
+
+
+if (
+requestedWords.length <
+count
+) {
+
+return res
+.status(
+400
+)
+.json({
+
+error:
+`You currently have ${requestedWords.length} usable English vocabulary item${
+requestedWords.length ===
+1
+? ""
+: "s"
+}. Choose a smaller test size or add more vocabulary first.`,
+
+});
+
+}
+
+}
+
+
+const aiAccess =
+await acquireAIRequestSlot(
+req,
+res,
+{
+
+authenticatedUser,
+
+authenticationAlreadyChecked:
+true,
+
+}
+);
+
+
+if (
+!aiAccess
+) {
+
+return;
+
+}
+
+
+try {
+
+const englishResult =
+await createEnglishVocabularyTestItems({
+
+language,
+sourceMode,
+knownRows,
+requestedWords,
+count,
+quizMode,
+
+});
+
+
+selected =
+englishResult.selected;
+
+
+englishDistractors =
+englishResult.distractors;
+
+} finally {
+
+aiAccess.release();
+
+}
+
+
+if (
+selected.length <
+count
+) {
+
+return res
+.status(
+502
+)
+.json({
+
+error:
+sourceMode ===
+"my_vocab"
+? "The AI could not create definitions for enough of your English vocabulary words. Please try again."
+: "The AI could not produce enough suitable English vocabulary words for this test. Please try again.",
+
+});
+
+}
+
+} else if (
 sourceMode ===
 "random"
 ) {
@@ -7206,7 +8081,9 @@ return res
 .json({
 
 error:
-"The dictionary could not provide enough usable words for this test.",
+isEnglishVocabularyTest
+? "The English vocabulary test could not provide enough usable words."
+: "The dictionary could not provide enough usable words for this test.",
 
 });
 
@@ -7225,10 +8102,42 @@ quizMode ===
 "multiple_choice"
 ) {
 
+if (
+isEnglishVocabularyTest
+) {
+
+const optionsReady =
+addEnglishMultipleChoiceOptions(
+selected,
+englishDistractors
+);
+
+
+if (
+!optionsReady
+) {
+
+return res
+.status(
+502
+)
+.json({
+
+error:
+"The AI could not provide enough suitable English answer options for this test. Please try again.",
+
+});
+
+}
+
+} else {
+
 addMultipleChoiceOptions(
 selected,
 language
 );
+
+}
 
 }
 
@@ -7566,7 +8475,7 @@ false;
 /*
 Multiple choice affects only the current quiz score.
 
-Only a correct Hardcore answer becomes persistent
+Only a correct Recall answer becomes persistent
 vocabulary evidence.
 */
 
@@ -7635,7 +8544,7 @@ error
 ) {
 
 console.error(
-"Hardcore vocabulary-test success persistence failed",
+"Recall vocabulary-test success persistence failed",
 {
 
 userId:
