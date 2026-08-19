@@ -1,4 +1,17 @@
 export const LANGUAGES = {
+  english: {
+    id: "english",
+    name: "English",
+    locale: "en-GB",
+    aiLanguageName: "English",
+    direction: "ltr",
+    specialCharacters: [],
+    wiktionaryLanguageCode: null,
+    dictionary: null,
+    openings: {},
+    vocabTestOnly: true,
+  },
+
   german: {
     id: "german",
     name: "German",
