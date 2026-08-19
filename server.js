@@ -2298,7 +2298,6 @@ const results =
 const seen =
 new Set();
 
-
 function addResult({
 word,
 lemma,
@@ -2837,6 +2836,73 @@ type:
 
 required: [
 "words",
+],
+
+additionalProperties:
+false,
+
+};
+
+}
+
+
+
+function makeNewVocabularySelectionSchema(
+maxItems
+) {
+
+return {
+
+type:
+"object",
+
+properties: {
+
+items: {
+
+type:
+"array",
+
+minItems:
+1,
+
+maxItems,
+
+items: {
+
+type:
+"object",
+
+properties: {
+
+word: {
+type:
+"string",
+},
+
+partOfSpeech: {
+type:
+"string",
+},
+
+},
+
+required: [
+"word",
+"partOfSpeech",
+],
+
+additionalProperties:
+false,
+
+},
+
+},
+
+},
+
+required: [
+"items",
 ],
 
 additionalProperties:
@@ -4005,7 +4071,6 @@ return [
 
 }
 
-
 // ---------------------------------------------------------
 // Vocabulary test helpers
 // ---------------------------------------------------------
@@ -4227,12 +4292,134 @@ row.pos !==
 }
 
 
+function normalisePartOfSpeechHint(
+value
+) {
+
+const raw =
+String(
+value ||
+""
+)
+.trim()
+.toLowerCase();
+
+
+const aliases = {
+
+adjective:
+"adj",
+
+adj:
+"adj",
+
+adverb:
+"adv",
+
+adv:
+"adv",
+
+noun:
+"noun",
+
+verb:
+"verb",
+
+pronoun:
+"pron",
+
+pron:
+"pron",
+
+preposition:
+"prep",
+
+prep:
+"prep",
+
+conjunction:
+"conj",
+
+conj:
+"conj",
+
+interjection:
+"intj",
+
+intj:
+"intj",
+
+determiner:
+"det",
+
+det:
+"det",
+
+article:
+"article",
+
+numeral:
+"num",
+
+number:
+"num",
+
+num:
+"num",
+
+particle:
+"particle",
+
+modal:
+"verb",
+
+"modal verb":
+"verb",
+
+};
+
+
+return aliases[
+raw
+] ||
+raw;
+
+}
+
+
+function partOfSpeechMatches(
+rowPos,
+preferredPartOfSpeech
+) {
+
+if (
+!preferredPartOfSpeech
+) {
+
+return false;
+
+}
+
+
+return normalisePartOfSpeechHint(
+rowPos
+) ===
+normalisePartOfSpeechHint(
+preferredPartOfSpeech
+);
+
+}
+
+
 function resolveTestItemFromWord(
 word,
 language,
 {
 preferStoredLemma =
 false,
+
+preferredPartOfSpeech =
+null,
 } =
 {}
 ) {
@@ -4287,19 +4474,64 @@ return null;
 }
 
 
-const ordered = [
-
-...rows.filter(
+const exactRows =
+rows.filter(
 row =>
 row.word ===
 cleaned
-),
+);
 
-...rows.filter(
+
+const otherRows =
+rows.filter(
 row =>
 row.word !==
 cleaned
+);
+
+
+const ordered =
+preferredPartOfSpeech
+? [
+
+...exactRows.filter(
+row =>
+partOfSpeechMatches(
+row.pos,
+preferredPartOfSpeech
+)
 ),
+
+...otherRows.filter(
+row =>
+partOfSpeechMatches(
+row.pos,
+preferredPartOfSpeech
+)
+),
+
+...exactRows.filter(
+row =>
+!partOfSpeechMatches(
+row.pos,
+preferredPartOfSpeech
+)
+),
+
+...otherRows.filter(
+row =>
+!partOfSpeechMatches(
+row.pos,
+preferredPartOfSpeech
+)
+),
+
+]
+: [
+
+...exactRows,
+
+...otherRows,
 
 ];
 
@@ -5122,7 +5354,13 @@ role:
 "system",
 
 content:
-`You select useful next vocabulary for a language learner. Return only dictionary-style single-word lemmas/headwords. Avoid proper nouns, phrases, obscure words, and anything already in the learner's known list. Prefer broadly useful everyday vocabulary. The target language is ${language.aiLanguageName}.`,
+`You select useful next vocabulary for a language learner.
+Return dictionary-style single-word lemmas/headwords together with the intended part of speech.
+Avoid proper nouns, phrases, obscure words, and anything already in the learner's known list.
+Prefer broadly useful everyday vocabulary.
+The target language is ${language.aiLanguageName}.
+The partOfSpeech field should use a simple dictionary category such as noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, numeral, interjection, or particle.
+If a word has several meanings or parts of speech, return the part of speech corresponding to the useful meaning you intend the learner to be tested on.`,
 
 },
 
@@ -5139,7 +5377,7 @@ content:
 ],
 
 schema:
-makeNewVocabularySchema(
+makeNewVocabularySelectionSchema(
 candidateCount
 ),
 
@@ -5147,7 +5385,7 @@ schemaName:
 "plainbetter_new_vocabulary_selection",
 
 maxOutputTokens:
-1200,
+1600,
 
 });
 
@@ -5174,8 +5412,8 @@ new Set();
 
 
 for (
-const word
-of parsed.words ||
+const candidate
+of parsed.items ||
 []
 ) {
 
@@ -5189,10 +5427,38 @@ break;
 }
 
 
+const word =
+String(
+candidate?.word ||
+""
+).trim();
+
+
+const preferredPartOfSpeech =
+String(
+candidate?.partOfSpeech ||
+""
+).trim();
+
+
+if (
+!word
+) {
+
+continue;
+
+}
+
+
 const item =
 resolveTestItemFromWord(
 word,
-language
+language,
+{
+
+preferredPartOfSpeech,
+
+}
 );
 
 
@@ -5804,6 +6070,7 @@ limit:
 
 
 // ---------------------------------------------------------
+
 // Basic/auth/config routes
 // ---------------------------------------------------------
 
@@ -6603,7 +6870,6 @@ new Set([
 ...vocabCounts.keys(),
 ...chatCounts.keys(),
 ]);
-
 
 const languages =
 Object.values(
@@ -7939,6 +8205,10 @@ language,
 preferStoredLemma:
 true,
 
+preferredPartOfSpeech:
+row.part_of_speech ||
+null,
+
 }
 );
 
@@ -8505,6 +8775,10 @@ language,
 preferStoredLemma:
 true,
 
+preferredPartOfSpeech:
+question.partOfSpeech ||
+null,
+
 }
 );
 
@@ -8677,3 +8951,4 @@ console.log(
 
 }
 );
+
