@@ -6,119 +6,160 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
 import {
-  LANGUAGES,
-  getLanguage,
-  languageHasDictionary,
+LANGUAGES,
+getLanguage,
+languageHasDictionary,
 } from "./languages.js";
 
 import {
-  SCENARIOS,
+SCENARIOS,
 } from "./scenarios.js";
 
 
 const app =
-  express();
+express();
 
 
 const PORT =
-  process.env.PORT ||
-  3000;
+process.env.PORT ||
+3000;
 
 
 const MODEL =
-  "gpt-5.6-luna";
+"gpt-5.6-luna";
 
 
 const MAX_MESSAGE_LENGTH =
-  2000;
+2000;
 
 
 const MAX_CUSTOM_SCENARIO_LENGTH =
-  2000;
+2000;
 
 
 const MAX_HISTORY_MESSAGES =
-  50;
+50;
 
 
 const MAX_VOCAB_TEST_WORDS =
-  30;
+30;
 
 
 const VOCAB_TEST_TTL_MS =
-  2 * 60 * 60 * 1000;
+2 * 60 * 60 * 1000;
+
+
+// ---------------------------------------------------------
+// Rate limits
+// ---------------------------------------------------------
+
+
+const GLOBAL_REQUESTS_PER_MINUTE =
+300;
+
+
+const DICTIONARY_REQUESTS_PER_MINUTE =
+120;
+
+
+const ANONYMOUS_AI_REQUESTS_PER_MINUTE =
+10;
+
+
+const ANONYMOUS_AI_REQUESTS_PER_HOUR =
+60;
+
+
+const AUTHENTICATED_AI_REQUESTS_PER_MINUTE =
+15;
+
+
+const AUTHENTICATED_AI_REQUESTS_PER_HOUR =
+120;
+
+
+const MAX_CONCURRENT_AI_REQUESTS =
+2;
+
+
+const ONE_MINUTE_MS =
+60 * 1000;
+
+
+const ONE_HOUR_MS =
+60 * 60 * 1000;
 
 
 const LEVELS = {
 
-  a1: {
-    id: "a1",
-    name: "A1 — Beginner",
-    prompt:
-      "Use very simple, high-frequency vocabulary and short sentences. Keep the interaction easy to follow and do not demand grammar beyond a beginner level.",
-  },
+a1: {
+id: "a1",
+name: "A1 — Beginner",
+prompt:
+"Use very simple, high-frequency vocabulary and short sentences. Keep the interaction easy to follow and do not demand grammar beyond a beginner level.",
+},
 
-  a2: {
-    id: "a2",
-    name: "A2 — Elementary",
-    prompt:
-      "Use common everyday vocabulary, mostly simple sentence structures, and manageable follow-up questions suitable for an elementary learner.",
-  },
+a2: {
+id: "a2",
+name: "A2 — Elementary",
+prompt:
+"Use common everyday vocabulary, mostly simple sentence structures, and manageable follow-up questions suitable for an elementary learner.",
+},
 
-  b1: {
-    id: "b1",
-    name: "B1 — Intermediate",
-    prompt:
-      "Use natural everyday language at an intermediate level, with some variety in vocabulary and sentence structure without becoming unnecessarily difficult.",
-  },
+b1: {
+id: "b1",
+name: "B1 — Intermediate",
+prompt:
+"Use natural everyday language at an intermediate level, with some variety in vocabulary and sentence structure without becoming unnecessarily difficult.",
+},
 
-  b2: {
-    id: "b2",
-    name: "B2 — Upper-intermediate",
-    prompt:
-      "Use fluent, natural language with broader vocabulary, idiomatic phrasing where appropriate, and more varied sentence structures suitable for an upper-intermediate learner.",
-  },
+b2: {
+id: "b2",
+name: "B2 — Upper-intermediate",
+prompt:
+"Use fluent, natural language with broader vocabulary, idiomatic phrasing where appropriate, and more varied sentence structures suitable for an upper-intermediate learner.",
+},
 
-  c1: {
-    id: "c1",
-    name: "C1 — Advanced",
-    prompt:
-      "Use sophisticated, natural language with nuanced vocabulary and idiomatic phrasing while remaining appropriate to the scenario.",
-  },
+c1: {
+id: "c1",
+name: "C1 — Advanced",
+prompt:
+"Use sophisticated, natural language with nuanced vocabulary and idiomatic phrasing while remaining appropriate to the scenario.",
+},
 
-  c2: {
-    id: "c2",
-    name: "C2 — Proficient",
-    prompt:
-      "Use fully natural, nuanced language at a proficient level, including subtle register choices and idiomatic expression where they fit the scenario.",
-  },
+c2: {
+id: "c2",
+name: "C2 — Proficient",
+prompt:
+"Use fully natural, nuanced language at a proficient level, including subtle register choices and idiomatic expression where they fit the scenario.",
+},
 
 };
 
 
 if (
-  !process.env.OPENAI_API_KEY
+!process.env.OPENAI_API_KEY
 ) {
 
-  console.error(
-    "OPENAI_API_KEY is not set."
-  );
+console.error(
+"OPENAI_API_KEY is not set."
+);
 
 
-  process.exit(
-    1
-  );
+process.exit(
+1
+);
 
 }
 
 
 const openai =
-  new OpenAI({
+new OpenAI({
 
-    apiKey:
-      process.env.OPENAI_API_KEY,
+apiKey:
+process.env.OPENAI_API_KEY,
 
-  });
+});
 
 
 // ---------------------------------------------------------
@@ -127,1035 +168,1615 @@ const openai =
 
 
 const SUPABASE_URL =
-  String(
-    process.env.SUPABASE_URL ||
-    ""
-  )
-    .trim()
-    .replace(
-      /\/+$/,
-      ""
-    );
+String(
+process.env.SUPABASE_URL ||
+""
+)
+.trim()
+.replace(
+/\/+$/,
+""
+);
 
 
 const SUPABASE_PUBLISHABLE_KEY =
-  String(
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    ""
-  ).trim();
+String(
+process.env.SUPABASE_PUBLISHABLE_KEY ||
+""
+).trim();
 
 
 const SUPABASE_SECRET_KEY =
-  String(
-    process.env.SUPABASE_SECRET_KEY ||
-    ""
-  ).trim();
+String(
+process.env.SUPABASE_SECRET_KEY ||
+""
+).trim();
 
 
 const SUPABASE_AUTH_CONFIGURED =
-  Boolean(
-    SUPABASE_URL &&
-    SUPABASE_PUBLISHABLE_KEY
-  );
+Boolean(
+SUPABASE_URL &&
+SUPABASE_PUBLISHABLE_KEY
+);
 
 
 const SUPABASE_DATABASE_CONFIGURED =
-  Boolean(
-    SUPABASE_URL &&
-    SUPABASE_SECRET_KEY
-  );
+Boolean(
+SUPABASE_URL &&
+SUPABASE_SECRET_KEY
+);
 
 
 if (
-  !SUPABASE_AUTH_CONFIGURED
+!SUPABASE_AUTH_CONFIGURED
 ) {
 
-  console.warn(
-    "Supabase authentication is not configured."
-  );
+console.warn(
+"Supabase authentication is not configured."
+);
 
 }
 
 
 if (
-  !SUPABASE_DATABASE_CONFIGURED
+!SUPABASE_DATABASE_CONFIGURED
 ) {
 
-  console.warn(
-    "Supabase trusted database access is not configured. Learner statistics will not be saved."
-  );
+console.warn(
+"Supabase trusted database access is not configured. Learner statistics will not be saved."
+);
 
 }
 
 
 function getAuthorizationHeader(
-  req
+req
 ) {
 
-  const value =
-    req.get(
-      "authorization"
-    );
+const value =
+req.get(
+"authorization"
+);
 
 
-  return typeof value ===
-    "string"
-      ? value.trim()
-      : "";
+return typeof value ===
+"string"
+? value.trim()
+: "";
 
 }
 
 
 function getBearerToken(
-  header
+header
 ) {
 
-  return String(
-    header ||
-    ""
-  ).match(
-    /^Bearer\s+(.+)$/i
-  )?.[
-    1
-  ]?.trim() ||
-    null;
+return String(
+header ||
+""
+).match(
+/^Bearer\s+(.+)$/i
+)?.[
+1
+]?.trim() ||
+null;
 
 }
 
 
 async function verifySupabaseAccessToken(
-  accessToken
+accessToken
 ) {
 
-  if (
-    !SUPABASE_AUTH_CONFIGURED
-  ) {
+if (
+!SUPABASE_AUTH_CONFIGURED
+) {
 
-    return {
+return {
 
-      status:
-        "unavailable",
+status:
+"unavailable",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  let response;
+let response;
 
 
-  try {
+try {
 
-    response =
-      await fetch(
-        `${SUPABASE_URL}/auth/v1/user`,
-        {
+response =
+await fetch(
+`${SUPABASE_URL}/auth/v1/user`,
+{
 
-          method:
-            "GET",
+method:
+"GET",
 
-          headers: {
+headers: {
 
-            apikey:
-              SUPABASE_PUBLISHABLE_KEY,
+apikey:
+SUPABASE_PUBLISHABLE_KEY,
 
-            Authorization:
-              `Bearer ${accessToken}`,
+Authorization:
+`Bearer ${accessToken}`,
 
-            Accept:
-              "application/json",
+Accept:
+"application/json",
 
-          },
+},
 
-          signal:
-            AbortSignal.timeout(
-              5000
-            ),
+signal:
+AbortSignal.timeout(
+5000
+),
 
-        }
-      );
+}
+);
 
-  } catch (
-    error
-  ) {
+} catch (
+error
+) {
 
-    console.error(
-      "Supabase Auth verification request failed",
-      {
-        message:
-          error?.message,
-      }
-    );
+console.error(
+"Supabase Auth verification request failed",
+{
+message:
+error?.message,
+}
+);
 
 
-    return {
+return {
 
-      status:
-        "unavailable",
+status:
+"unavailable",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  if (
-    response.status ===
-      401 ||
-    response.status ===
-      403
-  ) {
+if (
+response.status ===
+401 ||
+response.status ===
+403
+) {
 
-    return {
+return {
 
-      status:
-        "invalid",
+status:
+"invalid",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  if (
-    !response.ok
-  ) {
+if (
+!response.ok
+) {
 
-    console.error(
-      "Supabase Auth verification returned an unexpected status",
-      {
-        status:
-          response.status,
-      }
-    );
+console.error(
+"Supabase Auth verification returned an unexpected status",
+{
+status:
+response.status,
+}
+);
 
 
-    return {
+return {
 
-      status:
-        "unavailable",
+status:
+"unavailable",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  let user;
+let user;
 
 
-  try {
+try {
 
-    user =
-      await response.json();
+user =
+await response.json();
 
-  } catch (
-    error
-  ) {
+} catch (
+error
+) {
 
-    console.error(
-      "Supabase Auth returned invalid JSON",
-      {
-        message:
-          error?.message,
-      }
-    );
+console.error(
+"Supabase Auth returned invalid JSON",
+{
+message:
+error?.message,
+}
+);
 
 
-    return {
+return {
 
-      status:
-        "unavailable",
+status:
+"unavailable",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  if (
-    !user ||
-    typeof user.id !==
-      "string" ||
-    !user.id
-  ) {
+if (
+!user ||
+typeof user.id !==
+"string" ||
+!user.id
+) {
 
-    return {
+return {
 
-      status:
-        "unavailable",
+status:
+"unavailable",
 
-      user:
-        null,
+user:
+null,
 
-    };
+};
 
-  }
+}
 
 
-  return {
+return {
 
-    status:
-      "authenticated",
+status:
+"authenticated",
 
-    user: {
+user: {
 
-      id:
-        user.id,
+id:
+user.id,
 
-      email:
-        typeof user.email ===
-          "string"
-            ? user.email
-            : null,
+email:
+typeof user.email ===
+"string"
+? user.email
+: null,
 
-    },
+},
 
-  };
+};
 
 }
 
 
 async function getOptionalAuthenticatedUser(
-  req
+req
 ) {
 
-  const token =
-    getBearerToken(
-      getAuthorizationHeader(
-        req
-      )
-    );
+const token =
+getBearerToken(
+getAuthorizationHeader(
+req
+)
+);
 
 
-  if (
-    !token
-  ) {
+if (
+!token
+) {
 
-    return null;
-
-  }
-
-
-  const verification =
-    await verifySupabaseAccessToken(
-      token
-    );
-
-
-  return verification.status ===
-    "authenticated"
-      ? verification.user
-      : null;
+return null;
 
 }
 
 
-async function requireAuthenticatedUser(
-  req,
-  res
+const verification =
+await verifySupabaseAccessToken(
+token
+);
+
+
+return verification.status ===
+"authenticated"
+? verification.user
+: null;
+
+}
+
+
+// ---------------------------------------------------------
+// Rate-limit helpers
+// ---------------------------------------------------------
+
+
+const globalRateLimitStore =
+new Map();
+
+
+const dictionaryRateLimitStore =
+new Map();
+
+
+const aiMinuteRateLimitStore =
+new Map();
+
+
+const aiHourRateLimitStore =
+new Map();
+
+
+const aiConcurrentStore =
+new Map();
+
+
+const fixedWindowStores = [
+globalRateLimitStore,
+dictionaryRateLimitStore,
+aiMinuteRateLimitStore,
+aiHourRateLimitStore,
+];
+
+
+function getClientIp(
+req
 ) {
 
-  const accessToken =
-    getBearerToken(
-      getAuthorizationHeader(
-        req
-      )
-    );
+const forwarded =
+req.get(
+"x-forwarded-for"
+);
 
 
-  if (
-    !accessToken
-  ) {
+if (
+typeof forwarded ===
+"string" &&
+forwarded.trim()
+) {
 
-    res
-      .status(
-        401
-      )
-      .json({
-
-        error:
-          "Authentication is required.",
-
-      });
-
-
-    return null;
-
-  }
+const firstAddress =
+forwarded
+.split(
+","
+)[
+0
+]
+?.trim();
 
 
-  const verification =
-    await verifySupabaseAccessToken(
-      accessToken
-    );
+if (
+firstAddress
+) {
+
+return firstAddress;
+
+}
+
+}
 
 
-  if (
-    verification.status ===
-    "invalid"
-  ) {
+return String(
+req.socket
+?.remoteAddress ||
+"unknown"
+);
 
-    res
-      .status(
-        401
-      )
-      .json({
-
-        error:
-          "The Supabase access token is invalid or expired.",
-
-      });
+}
 
 
-    return null;
+function inspectFixedWindow(
+store,
+key,
+limit,
+windowMs
+) {
 
-  }
-
-
-  if (
-    verification.status ===
-    "unavailable"
-  ) {
-
-    res
-      .status(
-        503
-      )
-      .json({
-
-        error:
-          "Authentication verification is temporarily unavailable.",
-
-      });
+const now =
+Date.now();
 
 
-    return null;
+const current =
+store.get(
+key
+);
 
-  }
+
+if (
+!current ||
+current.resetAt <=
+now
+) {
+
+return {
+
+allowed:
+true,
+
+count:
+0,
+
+resetAt:
+now +
+windowMs,
+
+retryAfterSeconds:
+0,
+
+};
+
+}
 
 
-  return {
+if (
+current.count >=
+limit
+) {
 
-    user:
-      verification.user,
+return {
 
-    accessToken,
+allowed:
+false,
 
-  };
+count:
+current.count,
+
+resetAt:
+current.resetAt,
+
+retryAfterSeconds:
+Math.max(
+1,
+Math.ceil(
+(
+current.resetAt -
+now
+) /
+1000
+)
+),
+
+};
+
+}
+
+
+return {
+
+allowed:
+true,
+
+count:
+current.count,
+
+resetAt:
+current.resetAt,
+
+retryAfterSeconds:
+0,
+
+};
+
+}
+
+
+function incrementFixedWindow(
+store,
+key,
+windowMs
+) {
+
+const now =
+Date.now();
+
+
+const current =
+store.get(
+key
+);
+
+
+if (
+!current ||
+current.resetAt <=
+now
+) {
+
+store.set(
+key,
+{
+
+count:
+1,
+
+resetAt:
+now +
+windowMs,
+
+}
+);
+
+
+return;
+
+}
+
+
+current.count +=
+1;
+
+}
+
+
+function consumeFixedWindow(
+store,
+key,
+limit,
+windowMs
+) {
+
+const status =
+inspectFixedWindow(
+store,
+key,
+limit,
+windowMs
+);
+
+
+if (
+!status.allowed
+) {
+
+return status;
+
+}
+
+
+incrementFixedWindow(
+store,
+key,
+windowMs
+);
+
+
+return {
+
+...status,
+
+count:
+status.count +
+1,
+
+};
+
+}
+
+
+function sendRateLimitResponse(
+res,
+message,
+retryAfterSeconds
+) {
+
+res.setHeader(
+"Retry-After",
+String(
+Math.max(
+1,
+Math.ceil(
+retryAfterSeconds ||
+1
+)
+)
+)
+);
+
+
+return res
+.status(
+429
+)
+.json({
+
+error:
+message,
+
+});
+
+}
+
+
+function applyFixedWindowLimit({
+store,
+key,
+limit,
+windowMs,
+res,
+message,
+}) {
+
+const status =
+consumeFixedWindow(
+store,
+key,
+limit,
+windowMs
+);
+
+
+if (
+status.allowed
+) {
+
+return true;
+
+}
+
+
+sendRateLimitResponse(
+res,
+message,
+status.retryAfterSeconds
+);
+
+
+return false;
+
+}
+
+
+async function acquireAIRequestSlot(
+req,
+res,
+{
+authenticatedUser =
+null,
+authenticationAlreadyChecked =
+false,
+} =
+{}
+) {
+
+const user =
+authenticationAlreadyChecked
+? authenticatedUser
+: await getOptionalAuthenticatedUser(
+req
+);
+
+
+const isAuthenticated =
+Boolean(
+user?.id
+);
+
+
+const identityKey =
+isAuthenticated
+? `user:${user.id}`
+: `ip:${getClientIp(req)}`;
+
+
+const concurrentCount =
+aiConcurrentStore.get(
+identityKey
+) ||
+0;
+
+
+if (
+concurrentCount >=
+MAX_CONCURRENT_AI_REQUESTS
+) {
+
+sendRateLimitResponse(
+res,
+"Too many AI requests are already in progress. Please wait for one to finish and try again.",
+1
+);
+
+
+return null;
+
+}
+
+
+const minuteLimit =
+isAuthenticated
+? AUTHENTICATED_AI_REQUESTS_PER_MINUTE
+: ANONYMOUS_AI_REQUESTS_PER_MINUTE;
+
+
+const hourLimit =
+isAuthenticated
+? AUTHENTICATED_AI_REQUESTS_PER_HOUR
+: ANONYMOUS_AI_REQUESTS_PER_HOUR;
+
+
+const minuteStatus =
+inspectFixedWindow(
+aiMinuteRateLimitStore,
+identityKey,
+minuteLimit,
+ONE_MINUTE_MS
+);
+
+
+if (
+!minuteStatus.allowed
+) {
+
+sendRateLimitResponse(
+res,
+"Too many AI requests. Please wait a moment and try again.",
+minuteStatus.retryAfterSeconds
+);
+
+
+return null;
+
+}
+
+
+const hourStatus =
+inspectFixedWindow(
+aiHourRateLimitStore,
+identityKey,
+hourLimit,
+ONE_HOUR_MS
+);
+
+
+if (
+!hourStatus.allowed
+) {
+
+sendRateLimitResponse(
+res,
+"You have reached the current hourly AI request limit. Please try again later.",
+hourStatus.retryAfterSeconds
+);
+
+
+return null;
+
+}
+
+
+incrementFixedWindow(
+aiMinuteRateLimitStore,
+identityKey,
+ONE_MINUTE_MS
+);
+
+
+incrementFixedWindow(
+aiHourRateLimitStore,
+identityKey,
+ONE_HOUR_MS
+);
+
+
+aiConcurrentStore.set(
+identityKey,
+concurrentCount +
+1
+);
+
+
+let released =
+false;
+
+
+return {
+
+user,
+
+release() {
+
+if (
+released
+) {
+
+return;
+
+}
+
+
+released =
+true;
+
+
+const current =
+aiConcurrentStore.get(
+identityKey
+) ||
+0;
+
+
+if (
+current <=
+1
+) {
+
+aiConcurrentStore.delete(
+identityKey
+);
+
+} else {
+
+aiConcurrentStore.set(
+identityKey,
+current -
+1
+);
+
+}
+
+},
+
+};
+
+}
+
+
+function cleanupRateLimitStores() {
+
+const now =
+Date.now();
+
+
+for (
+const store
+of fixedWindowStores
+) {
+
+for (
+const [
+key,
+value,
+]
+of store.entries()
+) {
+
+if (
+value.resetAt <=
+now
+) {
+
+store.delete(
+key
+);
+
+}
+
+}
+
+}
+
+}
+
+
+setInterval(
+cleanupRateLimitStores,
+10 *
+60 *
+1000
+).unref?.();
+
+
+async function requireAuthenticatedUser(
+req,
+res
+) {
+
+const accessToken =
+getBearerToken(
+getAuthorizationHeader(
+req
+)
+);
+
+
+if (
+!accessToken
+) {
+
+res
+.status(
+401
+)
+.json({
+
+error:
+"Authentication is required.",
+
+});
+
+
+return null;
+
+}
+
+
+const verification =
+await verifySupabaseAccessToken(
+accessToken
+);
+
+
+if (
+verification.status ===
+"invalid"
+) {
+
+res
+.status(
+401
+)
+.json({
+
+error:
+"The Supabase access token is invalid or expired.",
+
+});
+
+
+return null;
+
+}
+
+
+if (
+verification.status ===
+"unavailable"
+) {
+
+res
+.status(
+503
+)
+.json({
+
+error:
+"Authentication verification is temporarily unavailable.",
+
+});
+
+
+return null;
+
+}
+
+
+return {
+
+user:
+verification.user,
+
+accessToken,
+
+};
 
 }
 
 
 async function callTrustedRpc(
-  functionName,
-  body
+functionName,
+body
 ) {
 
-  if (
-    !SUPABASE_DATABASE_CONFIGURED
-  ) {
+if (
+!SUPABASE_DATABASE_CONFIGURED
+) {
 
-    throw new Error(
-      "Trusted Supabase database access is not configured."
-    );
+throw new Error(
+"Trusted Supabase database access is not configured."
+);
 
-  }
-
-
-  const response =
-    await fetch(
-      `${SUPABASE_URL}/rest/v1/rpc/${functionName}`,
-      {
-
-        method:
-          "POST",
-
-        headers: {
-
-          apikey:
-            SUPABASE_SECRET_KEY,
-
-          "Content-Type":
-            "application/json",
-
-          Accept:
-            "application/json",
-
-        },
-
-        body:
-          JSON.stringify(
-            body
-          ),
-
-        signal:
-          AbortSignal.timeout(
-            5000
-          ),
-
-      }
-    );
+}
 
 
-  if (
-    !response.ok
-  ) {
+const response =
+await fetch(
+`${SUPABASE_URL}/rest/v1/rpc/${functionName}`,
+{
 
-    let detail =
-      "";
+method:
+"POST",
 
+headers: {
 
-    try {
+apikey:
+SUPABASE_SECRET_KEY,
 
-      detail =
-        (
-          await response.text()
-        ).slice(
-          0,
-          500
-        );
+"Content-Type":
+"application/json",
 
-    } catch {
+Accept:
+"application/json",
 
-      detail =
-        "";
+},
 
-    }
+body:
+JSON.stringify(
+body
+),
 
+signal:
+AbortSignal.timeout(
+5000
+),
 
-    throw new Error(
-      `Supabase RPC ${functionName} failed with status ${response.status}${
-        detail
-          ? `: ${detail}`
-          : ""
-      }`
-    );
-
-  }
+}
+);
 
 
-  if (
-    response.status ===
-    204
-  ) {
+if (
+!response.ok
+) {
 
-    return null;
-
-  }
+let detail =
+"";
 
 
-  const text =
-    await response.text();
+try {
+
+detail =
+(
+await response.text()
+).slice(
+0,
+500
+);
+
+} catch {
+
+detail =
+"";
+
+}
 
 
-  if (
-    !text
-  ) {
+throw new Error(
+`Supabase RPC ${functionName} failed with status ${response.status}${
+detail
+? `: ${detail}`
+: ""
+}`
+);
 
-    return null;
-
-  }
+}
 
 
-  try {
+if (
+response.status ===
+204
+) {
 
-    return JSON.parse(
-      text
-    );
+return null;
 
-  } catch {
+}
 
-    return text;
 
-  }
+const text =
+await response.text();
+
+
+if (
+!text
+) {
+
+return null;
+
+}
+
+
+try {
+
+return JSON.parse(
+text
+);
+
+} catch {
+
+return text;
+
+}
 
 }
 
 
 async function recordVocabularySuccesses({
-  userId,
-  languageId,
-  items,
+userId,
+languageId,
+items,
 }) {
 
-  if (
-    !items?.length
-  ) {
+if (
+!items?.length
+) {
 
-    return;
+return;
 
-  }
+}
 
 
-  await callTrustedRpc(
-    "record_vocabulary_successes",
-    {
+await callTrustedRpc(
+"record_vocabulary_successes",
+{
 
-      p_user_id:
-        userId,
+p_user_id:
+userId,
 
-      p_language:
-        languageId,
+p_language:
+languageId,
 
-      p_items:
-        items,
+p_items:
+items,
 
-    }
-  );
+}
+);
 
 }
 
 
 async function recordVocabularyTestSuccess({
-  userId,
-  languageId,
-  lemma,
-  lemmaKey,
-  partOfSpeech,
+userId,
+languageId,
+lemma,
+lemmaKey,
+partOfSpeech,
 }) {
 
-  await callTrustedRpc(
-    "record_vocabulary_test_success",
-    {
+await callTrustedRpc(
+"record_vocabulary_test_success",
+{
 
-      p_user_id:
-        userId,
+p_user_id:
+userId,
 
-      p_language:
-        languageId,
+p_language:
+languageId,
 
-      p_lemma:
-        lemma,
+p_lemma:
+lemma,
 
-      p_lemma_key:
-        lemmaKey,
+p_lemma_key:
+lemmaKey,
 
-      p_part_of_speech:
-        partOfSpeech ||
-        null,
+p_part_of_speech:
+partOfSpeech ||
+null,
 
-    }
-  );
+}
+);
 
 }
 
 
 async function recordChatSeconds(
-  userId,
-  languageId,
-  seconds
+userId,
+languageId,
+seconds
 ) {
 
-  const bounded =
-    Math.max(
-      0,
-      Math.min(
-        360,
-        Math.round(
-          Number(
-            seconds
-          ) ||
-          0
-        )
-      )
-    );
+const bounded =
+Math.max(
+0,
+Math.min(
+360,
+Math.round(
+Number(
+seconds
+) ||
+0
+)
+)
+);
 
 
-  if (
-    !bounded
-  ) {
+if (
+!bounded
+) {
 
-    return;
+return;
 
-  }
+}
 
 
-  await callTrustedRpc(
-    "record_chat_seconds",
-    {
+await callTrustedRpc(
+"record_chat_seconds",
+{
 
-      p_user_id:
-        userId,
+p_user_id:
+userId,
 
-      p_language:
-        languageId,
+p_language:
+languageId,
 
-      p_seconds:
-        bounded,
+p_seconds:
+bounded,
 
-    }
-  );
+}
+);
 
 }
 
 
 async function fetchOwnVocabularyRows({
 
-  accessToken,
+accessToken,
 
-  userId,
+userId,
 
-  languageId =
-    null,
+languageId =
+null,
 
-  fields =
-    "language,lemma,lemma_key,part_of_speech",
+fields =
+"language,lemma,lemma_key,part_of_speech",
 
 }) {
 
-  const pageSize =
-    1000;
+const pageSize =
+1000;
 
 
-  const allRows =
-    [];
+const allRows =
+[];
 
 
-  let offset =
-    0;
+let offset =
+0;
 
 
-  while (
-    true
-  ) {
+while (
+true
+) {
 
-    const params =
-      new URLSearchParams();
-
-
-    params.set(
-      "select",
-      fields
-    );
+const params =
+new URLSearchParams();
 
 
-    params.set(
-      "user_id",
-      `eq.${userId}`
-    );
+params.set(
+"select",
+fields
+);
 
 
-    if (
-      languageId
-    ) {
-
-      params.set(
-        "language",
-        `eq.${languageId}`
-      );
-
-    }
+params.set(
+"user_id",
+`eq.${userId}`
+);
 
 
-    params.set(
-      "order",
-      languageId
-        ? "lemma.asc"
-        : "language.asc,lemma.asc"
-    );
+if (
+languageId
+) {
+
+params.set(
+"language",
+`eq.${languageId}`
+);
+
+}
 
 
-    params.set(
-      "limit",
-      String(
-        pageSize
-      )
-    );
+params.set(
+"order",
+languageId
+? "lemma.asc"
+: "language.asc,lemma.asc"
+);
 
 
-    params.set(
-      "offset",
-      String(
-        offset
-      )
-    );
+params.set(
+"limit",
+String(
+pageSize
+)
+);
 
 
-    const response =
-      await fetch(
-        `${SUPABASE_URL}/rest/v1/vocabulary?${params}`,
-        {
-
-          headers: {
-
-            apikey:
-              SUPABASE_PUBLISHABLE_KEY,
-
-            Authorization:
-              `Bearer ${accessToken}`,
-
-            Accept:
-              "application/json",
-
-          },
-
-          signal:
-            AbortSignal.timeout(
-              5000
-            ),
-
-        }
-      );
+params.set(
+"offset",
+String(
+offset
+)
+);
 
 
-    if (
-      !response.ok
-    ) {
+const response =
+await fetch(
+`${SUPABASE_URL}/rest/v1/vocabulary?${params}`,
+{
 
-      throw new Error(
-        `Supabase vocabulary read failed with status ${response.status}`
-      );
+headers: {
 
-    }
+apikey:
+SUPABASE_PUBLISHABLE_KEY,
 
+Authorization:
+`Bearer ${accessToken}`,
 
-    const rows =
-      await response.json();
+Accept:
+"application/json",
 
+},
 
-    if (
-      !Array.isArray(
-        rows
-      )
-    ) {
+signal:
+AbortSignal.timeout(
+5000
+),
 
-      throw new Error(
-        "Supabase vocabulary read returned an invalid response."
-      );
-
-    }
-
-
-    allRows.push(
-      ...rows
-    );
+}
+);
 
 
-    if (
-      rows.length <
-      pageSize
-    ) {
+if (
+!response.ok
+) {
 
-      break;
+throw new Error(
+`Supabase vocabulary read failed with status ${response.status}`
+);
 
-    }
-
-
-    offset +=
-      pageSize;
-
-  }
+}
 
 
-  return allRows;
+const rows =
+await response.json();
+
+
+if (
+!Array.isArray(
+rows
+)
+) {
+
+throw new Error(
+"Supabase vocabulary read returned an invalid response."
+);
+
+}
+
+
+allRows.push(
+...rows
+);
+
+
+if (
+rows.length <
+pageSize
+) {
+
+break;
+
+}
+
+
+offset +=
+pageSize;
+
+}
+
+
+return allRows;
 
 }
 
 
 async function fetchOwnTotalChatSeconds({
 
-  accessToken,
+accessToken,
 
-  userId,
+userId,
 
 }) {
 
-  const params =
-    new URLSearchParams({
+const params =
+new URLSearchParams({
 
-      select:
-        "total_chat_seconds",
+select:
+"total_chat_seconds",
 
-      user_id:
-        `eq.${userId}`,
+user_id:
+`eq.${userId}`,
 
-      limit:
-        "1",
+limit:
+"1",
 
-    });
-
-
-  const response =
-    await fetch(
-      `${SUPABASE_URL}/rest/v1/learner_stats?${params}`,
-      {
-
-        headers: {
-
-          apikey:
-            SUPABASE_PUBLISHABLE_KEY,
-
-          Authorization:
-            `Bearer ${accessToken}`,
-
-          Accept:
-            "application/json",
-
-        },
-
-        signal:
-          AbortSignal.timeout(
-            5000
-          ),
-
-      }
-    );
+});
 
 
-  if (
-    !response.ok
-  ) {
+const response =
+await fetch(
+`${SUPABASE_URL}/rest/v1/learner_stats?${params}`,
+{
 
-    throw new Error(
-      `Supabase learner stats read failed with status ${response.status}`
-    );
+headers: {
 
-  }
+apikey:
+SUPABASE_PUBLISHABLE_KEY,
 
+Authorization:
+`Bearer ${accessToken}`,
 
-  const rows =
-    await response.json();
+Accept:
+"application/json",
 
+},
 
-  if (
-    !Array.isArray(
-      rows
-    )
-  ) {
+signal:
+AbortSignal.timeout(
+5000
+),
 
-    throw new Error(
-      "Supabase learner stats returned an invalid response."
-    );
-
-  }
+}
+);
 
 
-  return Math.max(
-    0,
-    Number(
-      rows[
-        0
-      ]?.total_chat_seconds ||
-      0
-    )
-  );
+if (
+!response.ok
+) {
+
+throw new Error(
+`Supabase learner stats read failed with status ${response.status}`
+);
+
+}
+
+
+const rows =
+await response.json();
+
+
+if (
+!Array.isArray(
+rows
+)
+) {
+
+throw new Error(
+"Supabase learner stats returned an invalid response."
+);
+
+}
+
+
+return Math.max(
+0,
+Number(
+rows[
+0
+]?.total_chat_seconds ||
+0
+)
+);
 
 }
 
 
 async function fetchOwnLanguageChatRows({
 
-  accessToken,
+accessToken,
 
-  userId,
+userId,
 
-  languageId =
-    null,
+languageId =
+null,
 
 }) {
 
-  const params =
-    new URLSearchParams();
+const params =
+new URLSearchParams();
 
 
-  params.set(
-    "select",
-    "language,total_chat_seconds"
-  );
+params.set(
+"select",
+"language,total_chat_seconds"
+);
 
 
-  params.set(
-    "user_id",
-    `eq.${userId}`
-  );
+params.set(
+"user_id",
+`eq.${userId}`
+);
 
 
-  if (
-    languageId
-  ) {
+if (
+languageId
+) {
 
-    params.set(
-      "language",
-      `eq.${languageId}`
-    );
+params.set(
+"language",
+`eq.${languageId}`
+);
 
-  }
-
-
-  params.set(
-    "order",
-    "language.asc"
-  );
+}
 
 
-  const response =
-    await fetch(
-      `${SUPABASE_URL}/rest/v1/learner_language_stats?${params}`,
-      {
-
-        headers: {
-
-          apikey:
-            SUPABASE_PUBLISHABLE_KEY,
-
-          Authorization:
-            `Bearer ${accessToken}`,
-
-          Accept:
-            "application/json",
-
-        },
-
-        signal:
-          AbortSignal.timeout(
-            5000
-          ),
-
-      }
-    );
+params.set(
+"order",
+"language.asc"
+);
 
 
-  if (
-    !response.ok
-  ) {
+const response =
+await fetch(
+`${SUPABASE_URL}/rest/v1/learner_language_stats?${params}`,
+{
 
-    throw new Error(
-      `Supabase language chat stats read failed with status ${response.status}`
-    );
+headers: {
 
-  }
+apikey:
+SUPABASE_PUBLISHABLE_KEY,
 
+Authorization:
+`Bearer ${accessToken}`,
 
-  const rows =
-    await response.json();
+Accept:
+"application/json",
 
+},
 
-  if (
-    !Array.isArray(
-      rows
-    )
-  ) {
+signal:
+AbortSignal.timeout(
+5000
+),
 
-    throw new Error(
-      "Supabase language chat stats returned an invalid response."
-    );
-
-  }
+}
+);
 
 
-  return rows;
+if (
+!response.ok
+) {
+
+throw new Error(
+`Supabase language chat stats read failed with status ${response.status}`
+);
+
+}
+
+
+const rows =
+await response.json();
+
+
+if (
+!Array.isArray(
+rows
+)
+) {
+
+throw new Error(
+"Supabase language chat stats returned an invalid response."
+);
+
+}
+
+
+return rows;
 
 }
 
@@ -1166,748 +1787,748 @@ async function fetchOwnLanguageChatRows({
 
 
 const dictionaries =
-  new Map();
+new Map();
 
 
 for (
-  const language
-  of Object.values(
-    LANGUAGES
-  )
+const language
+of Object.values(
+LANGUAGES
+)
 ) {
 
-  if (
-    !languageHasDictionary(
-      language
-    )
-  ) {
+if (
+!languageHasDictionary(
+language
+)
+) {
 
-    continue;
+continue;
 
-  }
-
-
-  const dictionaryPath =
-    resolve(
-      language.dictionary.path
-    );
+}
 
 
-  if (
-    !existsSync(
-      dictionaryPath
-    )
-  ) {
-
-    console.warn(
-      `${language.name} dictionary not found at ${dictionaryPath}. Word lookup will be unavailable.`
-    );
+const dictionaryPath =
+resolve(
+language.dictionary.path
+);
 
 
-    continue;
+if (
+!existsSync(
+dictionaryPath
+)
+) {
 
-  }
-
-
-  try {
-
-    const db =
-      new DatabaseSync(
-        dictionaryPath,
-        {
-          readOnly:
-            true,
-        }
-      );
+console.warn(
+`${language.name} dictionary not found at ${dictionaryPath}. Word lookup will be unavailable.`
+);
 
 
-    const columns =
-      db
-        .prepare(
-          "PRAGMA table_info(lexicon)"
-        )
-        .all()
-        .map(
-          row =>
-            row.name
-        );
+continue;
+
+}
 
 
-    const senseColumn =
-      columns.includes(
-        "senses"
-      )
-        ? "senses"
-        : columns.includes(
-            "meanings"
-          )
-          ? "meanings"
-          : null;
+try {
+
+const db =
+new DatabaseSync(
+dictionaryPath,
+{
+readOnly:
+true,
+}
+);
 
 
-    if (
-      !senseColumn
-    ) {
-
-      throw new Error(
-        "lexicon table has neither a senses nor meanings column"
-      );
-
-    }
-
-
-    const selectColumns =
-      `word, pos, ${senseColumn} AS senses, lemmas, grammar`;
+const columns =
+db
+.prepare(
+"PRAGMA table_info(lexicon)"
+)
+.all()
+.map(
+row =>
+row.name
+);
 
 
-    const lookup =
-      db.prepare(
-        `
-          SELECT
-            ${selectColumns}
-          FROM lexicon
-          WHERE normalized = ?
-          LIMIT 24
-        `
-      );
+const senseColumn =
+columns.includes(
+"senses"
+)
+? "senses"
+: columns.includes(
+"meanings"
+)
+? "meanings"
+: null;
 
 
-    let maxRowid =
-      0;
+if (
+!senseColumn
+) {
+
+throw new Error(
+"lexicon table has neither a senses nor meanings column"
+);
+
+}
 
 
-    let randomFromRowid =
-      null;
+const selectColumns =
+`word, pos, ${senseColumn} AS senses, lemmas, grammar`;
 
 
-    try {
-
-      maxRowid =
-        Number(
-          db
-            .prepare(
-              "SELECT MAX(rowid) AS maxRowid FROM lexicon"
-            )
-            .get()
-            ?.maxRowid ||
-          0
-        );
+const lookup =
+db.prepare(
+`
+SELECT
+${selectColumns}
+FROM lexicon
+WHERE normalized = ?
+LIMIT 24
+`
+);
 
 
-      randomFromRowid =
-        db.prepare(
-          `
-            SELECT
-              ${selectColumns}
-            FROM lexicon
-            WHERE rowid >= ?
-            ORDER BY rowid
-            LIMIT 1
-          `
-        );
-
-    } catch {
-
-    }
+let maxRowid =
+0;
 
 
-    const fallbackRandom =
-      db.prepare(
-        `
-          SELECT
-            ${selectColumns}
-          FROM lexicon
-          ORDER BY RANDOM()
-          LIMIT ?
-        `
-      );
+let randomFromRowid =
+null;
 
 
-    dictionaries.set(
-      language.id,
-      {
+try {
 
-        db,
-
-        lookup,
-
-        maxRowid,
-
-        randomFromRowid,
-
-        fallbackRandom,
-
-      }
-    );
+maxRowid =
+Number(
+db
+.prepare(
+"SELECT MAX(rowid) AS maxRowid FROM lexicon"
+)
+.get()
+?.maxRowid ||
+0
+);
 
 
-    console.log(
-      `${language.name} dictionary ready: ${dictionaryPath}`
-    );
+randomFromRowid =
+db.prepare(
+`
+SELECT
+${selectColumns}
+FROM lexicon
+WHERE rowid >= ?
+ORDER BY rowid
+LIMIT 1
+`
+);
 
-  } catch (
-    error
-  ) {
+} catch {
 
-    console.error(
-      `${language.name} dictionary could not be opened`,
-      {
-        message:
-          error?.message,
-      }
-    );
+}
 
-  }
+
+const fallbackRandom =
+db.prepare(
+`
+SELECT
+${selectColumns}
+FROM lexicon
+ORDER BY RANDOM()
+LIMIT ?
+`
+);
+
+
+dictionaries.set(
+language.id,
+{
+
+db,
+
+lookup,
+
+maxRowid,
+
+randomFromRowid,
+
+fallbackRandom,
+
+}
+);
+
+
+console.log(
+`${language.name} dictionary ready: ${dictionaryPath}`
+);
+
+} catch (
+error
+) {
+
+console.error(
+`${language.name} dictionary could not be opened`,
+{
+message:
+error?.message,
+}
+);
+
+}
 
 }
 
 
 function normalizeWord(
-  value,
-  language
+value,
+language
 ) {
 
-  return String(
-    value ||
-    ""
-  )
-    .normalize(
-      "NFC"
-    )
-    .toLocaleLowerCase(
-      language?.locale ||
-      undefined
-    );
+return String(
+value ||
+""
+)
+.normalize(
+"NFC"
+)
+.toLocaleLowerCase(
+language?.locale ||
+undefined
+);
 
 }
 
 
 function cleanLookupWord(
-  value
+value
 ) {
 
-  return String(
-    value ||
-    ""
-  )
-    .normalize(
-      "NFC"
-    )
-    .trim()
-    .replace(
-      /^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu,
-      ""
-    );
+return String(
+value ||
+""
+)
+.normalize(
+"NFC"
+)
+.trim()
+.replace(
+/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu,
+""
+);
 
 }
 
 
 function parseJsonArray(
-  value
+value
 ) {
 
-  if (
-    !value
-  ) {
+if (
+!value
+) {
 
-    return [];
+return [];
 
-  }
-
-
-  try {
-
-    const parsed =
-      JSON.parse(
-        value
-      );
+}
 
 
-    return Array.isArray(
-      parsed
-    )
-      ? parsed
-      : [];
+try {
 
-  } catch {
+const parsed =
+JSON.parse(
+value
+);
 
-    return [];
 
-  }
+return Array.isArray(
+parsed
+)
+? parsed
+: [];
+
+} catch {
+
+return [];
+
+}
 
 }
 
 
 const LOW_PRIORITY_SENSE_TAGS =
-  new Set([
-    "archaic",
-    "dated",
-    "historical",
-    "nonstandard",
-    "obsolete",
-    "offensive",
-    "rare",
-    "slang",
-    "vulgar",
-  ]);
+new Set([
+"archaic",
+"dated",
+"historical",
+"nonstandard",
+"obsolete",
+"offensive",
+"rare",
+"slang",
+"vulgar",
+]);
 
 
 function normaliseSenseList(
-  value
+value
 ) {
 
-  const senses =
-    [];
+const senses =
+[];
 
 
-  for (
-    const item
-    of parseJsonArray(
-      value
-    )
-  ) {
+for (
+const item
+of parseJsonArray(
+value
+)
+) {
 
-    if (
-      typeof item ===
-      "string"
-    ) {
+if (
+typeof item ===
+"string"
+) {
 
-      if (
-        item.trim()
-      ) {
+if (
+item.trim()
+) {
 
-        senses.push({
+senses.push({
 
-          meaning:
-            item.trim(),
+meaning:
+item.trim(),
 
-          tags: [],
+tags: [],
 
-        });
+});
 
-      }
-
-
-      continue;
-
-    }
+}
 
 
-    if (
-      !item ||
-      typeof item !==
-        "object"
-    ) {
+continue;
 
-      continue;
-
-    }
+}
 
 
-    const meaning =
-      String(
-        item.meaning ||
-        item.gloss ||
-        ""
-      ).trim();
+if (
+!item ||
+typeof item !==
+"object"
+) {
+
+continue;
+
+}
 
 
-    if (
-      !meaning
-    ) {
-
-      continue;
-
-    }
-
-
-    const tags =
-      Array.isArray(
-        item.tags
-      )
-        ? item.tags
-            .filter(
-              tag =>
-                typeof tag ===
-                  "string" &&
-                tag.trim()
-            )
-            .map(
-              tag =>
-                tag.trim()
-            )
-        : [];
+const meaning =
+String(
+item.meaning ||
+item.gloss ||
+""
+).trim();
 
 
-    senses.push({
+if (
+!meaning
+) {
 
-      meaning,
+continue;
 
-      tags,
-
-    });
-
-  }
+}
 
 
-  return senses
-    .map(
-      (
-        sense,
-        index
-      ) => ({
+const tags =
+Array.isArray(
+item.tags
+)
+? item.tags
+.filter(
+tag =>
+typeof tag ===
+"string" &&
+tag.trim()
+)
+.map(
+tag =>
+tag.trim()
+)
+: [];
 
-        ...sense,
 
-        _index:
-          index,
+senses.push({
 
-        _penalty:
-          sense.tags.reduce(
-            (
-              total,
-              tag
-            ) =>
-              total +
-              (
-                LOW_PRIORITY_SENSE_TAGS.has(
-                  tag
-                )
-                  ? 1
-                  : 0
-              ),
-            0
-          ),
+meaning,
 
-      })
-    )
-    .sort(
-      (
-        a,
-        b
-      ) =>
-        a._penalty -
-          b._penalty ||
-        a._index -
-          b._index
-    )
-    .map(
-      ({
-        meaning,
-        tags,
-      }) => ({
+tags,
 
-        meaning,
+});
 
-        tags,
+}
 
-      })
-    );
+
+return senses
+.map(
+(
+sense,
+index
+) => ({
+
+...sense,
+
+_index:
+index,
+
+_penalty:
+sense.tags.reduce(
+(
+total,
+tag
+) =>
+total +
+(
+LOW_PRIORITY_SENSE_TAGS.has(
+tag
+)
+? 1
+: 0
+),
+0
+),
+
+})
+)
+.sort(
+(
+a,
+b
+) =>
+a._penalty -
+b._penalty ||
+a._index -
+b._index
+)
+.map(
+({
+meaning,
+tags,
+}) => ({
+
+meaning,
+
+tags,
+
+})
+);
 
 }
 
 
 function compactDictionaryRows(
-  dictionaryContext,
-  language,
-  rows,
-  requestedWord,
-  requestedPos =
-    ""
+dictionaryContext,
+language,
+rows,
+requestedWord,
+requestedPos =
+""
 ) {
 
-  const exactCaseRows =
-    [];
+const exactCaseRows =
+[];
 
 
-  const preferredPosRows =
-    [];
+const preferredPosRows =
+[];
 
 
-  const otherRows =
-    [];
+const otherRows =
+[];
 
 
-  for (
-    const row
-    of rows
-  ) {
+for (
+const row
+of rows
+) {
 
-    if (
-      row.word ===
-      requestedWord
-    ) {
+if (
+row.word ===
+requestedWord
+) {
 
-      exactCaseRows.push(
-        row
-      );
+exactCaseRows.push(
+row
+);
 
-    } else if (
-      requestedPos &&
-      row.pos ===
-        requestedPos
-    ) {
+} else if (
+requestedPos &&
+row.pos ===
+requestedPos
+) {
 
-      preferredPosRows.push(
-        row
-      );
+preferredPosRows.push(
+row
+);
 
-    } else {
+} else {
 
-      otherRows.push(
-        row
-      );
+otherRows.push(
+row
+);
 
-    }
+}
 
-  }
+}
 
 
-  const orderedRows = [
-    ...exactCaseRows,
-    ...preferredPosRows,
-    ...otherRows,
-  ];
+const orderedRows = [
+...exactCaseRows,
+...preferredPosRows,
+...otherRows,
+];
 
 
-  const results =
-    [];
+const results =
+[];
 
 
-  const seen =
-    new Set();
+const seen =
+new Set();
 
 
-  function addResult({
-    word,
-    lemma,
-    pos,
-    senses,
-    grammar =
-      [],
-  }) {
+function addResult({
+word,
+lemma,
+pos,
+senses,
+grammar =
+[],
+}) {
 
-    const cleanSenses =
-      senses.slice(
-        0,
-        5
-      );
+const cleanSenses =
+senses.slice(
+0,
+5
+);
 
 
-    if (
-      !cleanSenses.length
-    ) {
+if (
+!cleanSenses.length
+) {
 
-      return;
+return;
 
-    }
+}
 
 
-    const key =
-      `${lemma}|${pos}|${cleanSenses
-        .map(
-          sense =>
-            sense.meaning
-        )
-        .join(
-          "|"
-        )}`;
+const key =
+`${lemma}|${pos}|${cleanSenses
+.map(
+sense =>
+sense.meaning
+)
+.join(
+"|"
+)}`;
 
 
-    if (
-      seen.has(
-        key
-      )
-    ) {
+if (
+seen.has(
+key
+)
+) {
 
-      return;
+return;
 
-    }
+}
 
 
-    seen.add(
-      key
-    );
+seen.add(
+key
+);
 
 
-    results.push({
+results.push({
 
-      word,
+word,
 
-      lemma,
+lemma,
 
-      partOfSpeech:
-        pos,
+partOfSpeech:
+pos,
 
-      senses:
-        cleanSenses,
+senses:
+cleanSenses,
 
-      meanings:
-        cleanSenses.map(
-          sense =>
-            sense.meaning
-        ),
+meanings:
+cleanSenses.map(
+sense =>
+sense.meaning
+),
 
-      grammar:
-        grammar.slice(
-          0,
-          8
-        ),
+grammar:
+grammar.slice(
+0,
+8
+),
 
-    });
+});
 
-  }
+}
 
 
-  for (
-    const row
-    of orderedRows
-  ) {
+for (
+const row
+of orderedRows
+) {
 
-    const directSenses =
-      normaliseSenseList(
-        row.senses
-      );
+const directSenses =
+normaliseSenseList(
+row.senses
+);
 
 
-    const lemmas =
-      parseJsonArray(
-        row.lemmas
-      );
+const lemmas =
+parseJsonArray(
+row.lemmas
+);
 
 
-    const grammar =
-      parseJsonArray(
-        row.grammar
-      );
+const grammar =
+parseJsonArray(
+row.grammar
+);
 
 
-    addResult({
+addResult({
 
-      word:
-        row.word,
+word:
+row.word,
 
-      lemma:
-        row.word,
+lemma:
+row.word,
 
-      pos:
-        row.pos,
+pos:
+row.pos,
 
-      senses:
-        directSenses,
+senses:
+directSenses,
 
-    });
+});
 
 
-    for (
-      const lemma
-      of lemmas.slice(
-        0,
-        3
-      )
-    ) {
+for (
+const lemma
+of lemmas.slice(
+0,
+3
+)
+) {
 
-      if (
-        typeof lemma !==
-          "string" ||
-        !lemma.trim()
-      ) {
+if (
+typeof lemma !==
+"string" ||
+!lemma.trim()
+) {
 
-        continue;
+continue;
 
-      }
+}
 
 
-      const lemmaRows =
-        dictionaryContext
-          .lookup
-          .all(
-            normalizeWord(
-              lemma,
-              language
-            )
-          );
+const lemmaRows =
+dictionaryContext
+.lookup
+.all(
+normalizeWord(
+lemma,
+language
+)
+);
 
 
-      const orderedLemmaRows =
-        requestedPos
-          ? [
-              ...lemmaRows.filter(
-                item =>
-                  item.pos ===
-                  requestedPos
-              ),
+const orderedLemmaRows =
+requestedPos
+? [
+...lemmaRows.filter(
+item =>
+item.pos ===
+requestedPos
+),
 
-              ...lemmaRows.filter(
-                item =>
-                  item.pos !==
-                  requestedPos
-              ),
-            ]
-          : lemmaRows;
+...lemmaRows.filter(
+item =>
+item.pos !==
+requestedPos
+),
+]
+: lemmaRows;
 
 
-      for (
-        const lemmaRow
-        of orderedLemmaRows
-      ) {
+for (
+const lemmaRow
+of orderedLemmaRows
+) {
 
-        const lemmaSenses =
-          normaliseSenseList(
-            lemmaRow.senses
-          );
+const lemmaSenses =
+normaliseSenseList(
+lemmaRow.senses
+);
 
 
-        if (
-          !lemmaSenses.length
-        ) {
+if (
+!lemmaSenses.length
+) {
 
-          continue;
+continue;
 
-        }
+}
 
 
-        addResult({
+addResult({
 
-          word:
-            row.word,
+word:
+row.word,
 
-          lemma,
+lemma,
 
-          pos:
-            lemmaRow.pos,
+pos:
+lemmaRow.pos,
 
-          senses:
-            lemmaSenses,
+senses:
+lemmaSenses,
 
-          grammar,
+grammar,
 
-        });
+});
 
 
-        break;
+break;
 
-      }
+}
 
-    }
+}
 
 
-    if (
-      results.length >=
-      4
-    ) {
+if (
+results.length >=
+4
+) {
 
-      break;
+break;
 
-    }
+}
 
-  }
+}
 
 
-  return results.slice(
-    0,
-    4
-  );
+return results.slice(
+0,
+4
+);
 
 }
 
@@ -1919,309 +2540,309 @@ function compactDictionaryRows(
 
 const feedbackSchema = {
 
-  type:
-    "object",
+type:
+"object",
 
-  properties: {
+properties: {
 
-    hasIssues: {
-      type:
-        "boolean",
-    },
+hasIssues: {
+type:
+"boolean",
+},
 
-    correctedVersion: {
-      type: [
-        "string",
-        "null",
-      ],
-    },
+correctedVersion: {
+type: [
+"string",
+"null",
+],
+},
 
-    explanation: {
-      type:
-        "string",
-    },
+explanation: {
+type:
+"string",
+},
 
-  },
+},
 
-  required: [
-    "hasIssues",
-    "correctedVersion",
-    "explanation",
-  ],
+required: [
+"hasIssues",
+"correctedVersion",
+"explanation",
+],
 
-  additionalProperties:
-    false,
+additionalProperties:
+false,
 
 };
 
 
 const wordMetadataArraySchema = {
 
-  type:
-    "array",
+type:
+"array",
 
-  items: {
+items: {
 
-    type:
-      "object",
+type:
+"object",
 
-    properties: {
+properties: {
 
-      surface: {
-        type:
-          "string",
-      },
+surface: {
+type:
+"string",
+},
 
-      lookup: {
-        type:
-          "string",
-      },
+lookup: {
+type:
+"string",
+},
 
-      pos: {
-        type:
-          "string",
-      },
+pos: {
+type:
+"string",
+},
 
-    },
+},
 
-    required: [
-      "surface",
-      "lookup",
-      "pos",
-    ],
+required: [
+"surface",
+"lookup",
+"pos",
+],
 
-    additionalProperties:
-      false,
+additionalProperties:
+false,
 
-  },
+},
 
 };
 
 
 function makeChatResponseSchema(
-  includeWordMetadata
+includeWordMetadata
 ) {
 
-  const properties = {
+const properties = {
 
-    reply: {
-      type:
-        "string",
-    },
+reply: {
+type:
+"string",
+},
 
-    feedback:
-      feedbackSchema,
+feedback:
+feedbackSchema,
 
-    conversationEnded: {
-      type:
-        "boolean",
-    },
+conversationEnded: {
+type:
+"boolean",
+},
 
-  };
-
-
-  const required = [
-    "reply",
-    "feedback",
-    "conversationEnded",
-  ];
+};
 
 
-  if (
-    includeWordMetadata
-  ) {
-
-    properties.replyWords =
-      wordMetadataArraySchema;
-
-
-    required.push(
-      "replyWords"
-    );
-
-  }
+const required = [
+"reply",
+"feedback",
+"conversationEnded",
+];
 
 
-  return {
+if (
+includeWordMetadata
+) {
 
-    type:
-      "object",
+properties.replyWords =
+wordMetadataArraySchema;
 
-    properties,
 
-    required,
+required.push(
+"replyWords"
+);
 
-    additionalProperties:
-      false,
+}
 
-  };
+
+return {
+
+type:
+"object",
+
+properties,
+
+required,
+
+additionalProperties:
+false,
+
+};
 
 }
 
 
 function makeCustomOpeningSchema(
-  includeWordMetadata
+includeWordMetadata
 ) {
 
-  const properties = {
+const properties = {
 
-    reply: {
-      type:
-        "string",
-    },
+reply: {
+type:
+"string",
+},
 
-  };
-
-
-  const required = [
-    "reply",
-  ];
+};
 
 
-  if (
-    includeWordMetadata
-  ) {
-
-    properties.replyWords =
-      wordMetadataArraySchema;
+const required = [
+"reply",
+];
 
 
-    required.push(
-      "replyWords"
-    );
+if (
+includeWordMetadata
+) {
 
-  }
+properties.replyWords =
+wordMetadataArraySchema;
 
 
-  return {
+required.push(
+"replyWords"
+);
 
-    type:
-      "object",
+}
 
-    properties,
 
-    required,
+return {
 
-    additionalProperties:
-      false,
+type:
+"object",
 
-  };
+properties,
+
+required,
+
+additionalProperties:
+false,
+
+};
 
 }
 
 
 function makeExampleResponseSchema(
-  includeWordMetadata
+includeWordMetadata
 ) {
 
-  const properties = {
+const properties = {
 
-    exampleMessage: {
-      type:
-        "string",
-    },
+exampleMessage: {
+type:
+"string",
+},
 
-    exampleTranslation: {
-      type:
-        "string",
-    },
+exampleTranslation: {
+type:
+"string",
+},
 
-    reply: {
-      type:
-        "string",
-    },
+reply: {
+type:
+"string",
+},
 
-    conversationEnded: {
-      type:
-        "boolean",
-    },
+conversationEnded: {
+type:
+"boolean",
+},
 
-  };
-
-
-  const required = [
-    "exampleMessage",
-    "exampleTranslation",
-    "reply",
-    "conversationEnded",
-  ];
+};
 
 
-  if (
-    includeWordMetadata
-  ) {
-
-    properties.exampleWords =
-      wordMetadataArraySchema;
-
-
-    properties.replyWords =
-      wordMetadataArraySchema;
+const required = [
+"exampleMessage",
+"exampleTranslation",
+"reply",
+"conversationEnded",
+];
 
 
-    required.push(
-      "exampleWords",
-      "replyWords"
-    );
+if (
+includeWordMetadata
+) {
 
-  }
+properties.exampleWords =
+wordMetadataArraySchema;
 
 
-  return {
+properties.replyWords =
+wordMetadataArraySchema;
 
-    type:
-      "object",
 
-    properties,
+required.push(
+"exampleWords",
+"replyWords"
+);
 
-    required,
+}
 
-    additionalProperties:
-      false,
 
-  };
+return {
+
+type:
+"object",
+
+properties,
+
+required,
+
+additionalProperties:
+false,
+
+};
 
 }
 
 
 function makeNewVocabularySchema(
-  maxItems
+maxItems
 ) {
 
-  return {
+return {
 
-    type:
-      "object",
+type:
+"object",
 
-    properties: {
+properties: {
 
-      words: {
+words: {
 
-        type:
-          "array",
+type:
+"array",
 
-        minItems:
-          1,
+minItems:
+1,
 
-        maxItems,
+maxItems,
 
-        items: {
-          type:
-            "string",
-        },
+items: {
+type:
+"string",
+},
 
-      },
+},
 
-    },
+},
 
-    required: [
-      "words",
-    ],
+required: [
+"words",
+],
 
-    additionalProperties:
-      false,
+additionalProperties:
+false,
 
-  };
+};
 
 }
 
@@ -2232,353 +2853,353 @@ function makeNewVocabularySchema(
 
 
 function getLevel(
-  levelId
+levelId
 ) {
 
-  return LEVELS[
-    String(
-      levelId ||
-      ""
-    ).toLowerCase()
-  ] ||
-    null;
+return LEVELS[
+String(
+levelId ||
+""
+).toLowerCase()
+] ||
+null;
 
 }
 
 
 function validateHistory(
-  history
+history
 ) {
 
-  if (
-    history == null
-  ) {
+if (
+history == null
+) {
 
-    return {
-      history: [],
-    };
+return {
+history: [],
+};
 
-  }
-
-
-  if (
-    !Array.isArray(
-      history
-    )
-  ) {
-
-    return {
-      error:
-        "history must be an array.",
-    };
-
-  }
+}
 
 
-  if (
-    history.length >
-    MAX_HISTORY_MESSAGES
-  ) {
+if (
+!Array.isArray(
+history
+)
+) {
 
-    return {
-      error:
-        `history is too long. Maximum: ${MAX_HISTORY_MESSAGES} messages.`,
-    };
+return {
+error:
+"history must be an array.",
+};
 
-  }
-
-
-  const cleaned =
-    [];
+}
 
 
-  for (
-    const item
-    of history
-  ) {
+if (
+history.length >
+MAX_HISTORY_MESSAGES
+) {
 
-    if (
-      !item ||
-      ![
-        "user",
-        "assistant",
-      ].includes(
-        item.role
-      ) ||
-      typeof item.content !==
-        "string"
-    ) {
+return {
+error:
+`history is too long. Maximum: ${MAX_HISTORY_MESSAGES} messages.`,
+};
 
-      return {
-        error:
-          "history contains an invalid message.",
-      };
-
-    }
+}
 
 
-    if (
-      item.content.length >
-      MAX_MESSAGE_LENGTH
-    ) {
-
-      return {
-        error:
-          `A history message is too long. Maximum: ${MAX_MESSAGE_LENGTH} characters.`,
-      };
-
-    }
+const cleaned =
+[];
 
 
-    cleaned.push({
+for (
+const item
+of history
+) {
 
-      role:
-        item.role,
+if (
+!item ||
+![
+"user",
+"assistant",
+].includes(
+item.role
+) ||
+typeof item.content !==
+"string"
+) {
 
-      content:
-        item.content,
+return {
+error:
+"history contains an invalid message.",
+};
 
-    });
-
-  }
+}
 
 
-  return {
-    history:
-      cleaned,
-  };
+if (
+item.content.length >
+MAX_MESSAGE_LENGTH
+) {
+
+return {
+error:
+`A history message is too long. Maximum: ${MAX_MESSAGE_LENGTH} characters.`,
+};
+
+}
+
+
+cleaned.push({
+
+role:
+item.role,
+
+content:
+item.content,
+
+});
+
+}
+
+
+return {
+history:
+cleaned,
+};
 
 }
 
 
 function validateCustomScenario(
-  value
+value
 ) {
 
-  if (
-    typeof value !==
-      "string" ||
-    !value.trim()
-  ) {
+if (
+typeof value !==
+"string" ||
+!value.trim()
+) {
 
-    return {
-      error:
-        "customScenario must be a non-empty string for a custom scenario.",
-    };
+return {
+error:
+"customScenario must be a non-empty string for a custom scenario.",
+};
 
-  }
-
-
-  const customScenario =
-    value.trim();
+}
 
 
-  if (
-    customScenario.length >
-    MAX_CUSTOM_SCENARIO_LENGTH
-  ) {
-
-    return {
-      error:
-        `customScenario is too long. Maximum: ${MAX_CUSTOM_SCENARIO_LENGTH} characters.`,
-    };
-
-  }
+const customScenario =
+value.trim();
 
 
-  return {
-    customScenario,
-  };
+if (
+customScenario.length >
+MAX_CUSTOM_SCENARIO_LENGTH
+) {
+
+return {
+error:
+`customScenario is too long. Maximum: ${MAX_CUSTOM_SCENARIO_LENGTH} characters.`,
+};
+
+}
+
+
+return {
+customScenario,
+};
 
 }
 
 
 function getConversationContext(
-  body =
-    {}
+body =
+{}
 ) {
 
-  const language =
-    getLanguage(
-      String(
-        body.language ||
-        ""
-      ).toLowerCase()
-    );
+const language =
+getLanguage(
+String(
+body.language ||
+""
+).toLowerCase()
+);
 
 
-  if (
-    !language
-  ) {
+if (
+!language
+) {
 
-    return {
-      error:
-        "Unknown language.",
-    };
+return {
+error:
+"Unknown language.",
+};
 
-  }
-
-
-  const level =
-    getLevel(
-      body.level
-    );
+}
 
 
-  if (
-    !level
-  ) {
-
-    return {
-      error:
-        "Unknown language level.",
-    };
-
-  }
+const level =
+getLevel(
+body.level
+);
 
 
-  const scenarioKey =
-    String(
-      body.scenario ||
-      ""
-    ).toLowerCase();
+if (
+!level
+) {
+
+return {
+error:
+"Unknown language level.",
+};
+
+}
 
 
-  const dictionaryEnabled =
-    languageHasDictionary(
-      language
-    ) &&
-    dictionaries.has(
-      language.id
-    );
+const scenarioKey =
+String(
+body.scenario ||
+""
+).toLowerCase();
 
 
-  if (
-    scenarioKey ===
-    "custom"
-  ) {
-
-    const customResult =
-      validateCustomScenario(
-        body.customScenario
-      );
+const dictionaryEnabled =
+languageHasDictionary(
+language
+) &&
+dictionaries.has(
+language.id
+);
 
 
-    if (
-      customResult.error
-    ) {
+if (
+scenarioKey ===
+"custom"
+) {
 
-      return customResult;
-
-    }
-
-
-    return {
-
-      language,
-
-      level,
-
-      scenarioKey,
-
-      scenario: {
-
-        name:
-          "Custom scenario",
-
-        role:
-          "Adopt the role that best fits the learner's custom scenario description.",
-
-        situation:
-          customResult.customScenario,
-
-      },
-
-      customScenario:
-        customResult.customScenario,
-
-      dictionaryEnabled,
-
-    };
-
-  }
+const customResult =
+validateCustomScenario(
+body.customScenario
+);
 
 
-  const scenario =
-    SCENARIOS[
-      scenarioKey
-    ];
+if (
+customResult.error
+) {
+
+return customResult;
+
+}
 
 
-  if (
-    !scenario
-  ) {
+return {
 
-    return {
-      error:
-        "Unknown scenario.",
-    };
+language,
 
-  }
+level,
+
+scenarioKey,
+
+scenario: {
+
+name:
+"Custom scenario",
+
+role:
+"Adopt the role that best fits the learner's custom scenario description.",
+
+situation:
+customResult.customScenario,
+
+},
+
+customScenario:
+customResult.customScenario,
+
+dictionaryEnabled,
+
+};
+
+}
 
 
-  const opening =
-    language.openings?.[
-      scenarioKey
-    ];
+const scenario =
+SCENARIOS[
+scenarioKey
+];
 
 
-  if (
-    typeof opening !==
-      "string" ||
-    !opening.trim()
-  ) {
+if (
+!scenario
+) {
 
-    return {
-      error:
-        `${language.name} does not have an opening configured for this scenario.`,
-    };
+return {
+error:
+"Unknown scenario.",
+};
 
-  }
+}
 
 
-  return {
+const opening =
+language.openings?.[
+scenarioKey
+];
 
-    language,
 
-    level,
+if (
+typeof opening !==
+"string" ||
+!opening.trim()
+) {
 
-    scenarioKey,
+return {
+error:
+`${language.name} does not have an opening configured for this scenario.`,
+};
 
-    scenario,
+}
 
-    opening:
-      opening.trim(),
 
-    dictionaryEnabled,
+return {
 
-  };
+language,
+
+level,
+
+scenarioKey,
+
+scenario,
+
+opening:
+opening.trim(),
+
+dictionaryEnabled,
+
+};
 
 }
 
 
 /*
-  IMPORTANT LANGUAGE SPLIT
+IMPORTANT LANGUAGE SPLIT
 
-  The role-play itself is in the language being learned.
+The role-play itself is in the language being learned.
 
-  The corrected sentence is also in the language being learned.
+The corrected sentence is also in the language being learned.
 
-  All instructional feedback and explanations are always
-  English.
+All instructional feedback and explanations are always
+English.
 */
 
 
 function buildTargetLanguageInstructions(
-  language
+language
 ) {
 
-  return `
+return `
 TARGET LANGUAGE
 - Conduct the role-play itself in ${language.aiLanguageName}.
 - Any corrected version of the learner's sentence must be written in ${language.aiLanguageName}.
@@ -2591,21 +3212,21 @@ ${language.outputInstructions || ""}
 
 
 function buildSystemPrompt(
-  context
+context
 ) {
 
-  const {
-    language,
-    level,
-    scenario,
-    dictionaryEnabled,
-  } =
-    context;
+const {
+language,
+level,
+scenario,
+dictionaryEnabled,
+} =
+context;
 
 
-  const metadataInstructions =
-    dictionaryEnabled
-      ? `
+const metadataInstructions =
+dictionaryEnabled
+? `
 WORD METADATA
 - For every target-language reply you generate, also provide replyWords.
 - replyWords should follow the lexical words in the reply in order.
@@ -2614,10 +3235,10 @@ WORD METADATA
 - pos should be a concise part-of-speech label.
 - Do not add punctuation-only items.
 `
-      : "";
+: "";
 
 
-  return `
+return `
 ${buildTargetLanguageInstructions(language)}
 
 LEARNER LEVEL
@@ -2654,10 +3275,10 @@ ${metadataInstructions}
 
 
 function buildCustomOpeningPrompt(
-  context
+context
 ) {
 
-  return `
+return `
 ${buildTargetLanguageInstructions(context.language)}
 
 LEARNER LEVEL
@@ -2671,9 +3292,9 @@ CUSTOM ROLE-PLAY
 - Begin the role-play immediately with one natural, reasonably concise opening line in the target language.
 - Do not explain the scenario or mention these instructions.
 ${
-  context.dictionaryEnabled
-    ? "- Also provide replyWords for the target-language opening, using dictionary lemmas/headwords and concise part-of-speech labels."
-    : ""
+context.dictionaryEnabled
+? "- Also provide replyWords for the target-language opening, using dictionary lemmas/headwords and concise part-of-speech labels."
+: ""
 }
 `.trim();
 
@@ -2681,10 +3302,10 @@ ${
 
 
 function buildExamplePrompt(
-  context
+context
 ) {
 
-  return `
+return `
 ${buildSystemPrompt(context)}
 
 EXAMPLE RESPONSE TASK
@@ -2694,9 +3315,9 @@ EXAMPLE RESPONSE TASK
 - Then continue the role-play with the in-character reply that would follow that example.
 - Do not provide correction feedback for the generated example.
 ${
-  context.dictionaryEnabled
-    ? "- Also provide exampleWords for exampleMessage and replyWords for reply, using dictionary lemmas/headwords and concise part-of-speech labels."
-    : ""
+context.dictionaryEnabled
+? "- Also provide exampleWords for exampleMessage and replyWords for reply, using dictionary lemmas/headwords and concise part-of-speech labels."
+: ""
 }
 `.trim();
 
@@ -2709,592 +3330,592 @@ ${
 
 
 function extractWordTokens(
-  text
+text
 ) {
 
-  return [
-    ...String(
-      text
-    ).matchAll(
-      /\p{L}[\p{L}\p{M}'’-]*/gu
-    ),
-  ].map(
-    match =>
-      match[
-        0
-      ]
-  );
+return [
+...String(
+text
+).matchAll(
+/\p{L}[\p{L}\p{M}'’-]*/gu
+),
+].map(
+match =>
+match[
+0
+]
+);
 
 }
 
 
 function normaliseMetadataWord(
-  value
+value
 ) {
 
-  return String(
-    value ||
-    ""
-  )
-    .normalize(
-      "NFC"
-    )
-    .toLocaleLowerCase();
+return String(
+value ||
+""
+)
+.normalize(
+"NFC"
+)
+.toLocaleLowerCase();
 
 }
 
 
 function alignWordMetadata(
-  text,
-  metadata
+text,
+metadata
 ) {
 
-  if (
-    !Array.isArray(
-      metadata
-    ) ||
-    !metadata.length
-  ) {
+if (
+!Array.isArray(
+metadata
+) ||
+!metadata.length
+) {
 
-    return [];
+return [];
 
-  }
-
-
-  const words =
-    extractWordTokens(
-      text
-    );
+}
 
 
-  const modelWords =
-    metadata
-      .filter(
-        item =>
-          item &&
-          typeof item.surface ===
-            "string" &&
-          typeof item.lookup ===
-            "string" &&
-          typeof item.pos ===
-            "string"
-      )
-      .map(
-        item => ({
-
-          surface:
-            item.surface,
-
-          lookup:
-            item.lookup.trim() ||
-            item.surface,
-
-          pos:
-            item.pos.trim() ||
-            "other",
-
-        })
-      );
+const words =
+extractWordTokens(
+text
+);
 
 
-  if (
-    !words.length ||
-    !modelWords.length
-  ) {
+const modelWords =
+metadata
+.filter(
+item =>
+item &&
+typeof item.surface ===
+"string" &&
+typeof item.lookup ===
+"string" &&
+typeof item.pos ===
+"string"
+)
+.map(
+item => ({
 
-    return [];
+surface:
+item.surface,
 
-  }
+lookup:
+item.lookup.trim() ||
+item.surface,
 
+pos:
+item.pos.trim() ||
+"other",
 
-  const n =
-    words.length;
-
-
-  const m =
-    modelWords.length;
-
-
-  const dp =
-    Array.from(
-      {
-        length:
-          n +
-          1,
-      },
-      () =>
-        Array(
-          m +
-          1
-        ).fill(
-          0
-        )
-    );
+})
+);
 
 
-  for (
-    let i =
-      n -
-      1;
+if (
+!words.length ||
+!modelWords.length
+) {
 
-    i >=
-      0;
+return [];
 
-    i -=
-      1
-  ) {
-
-    for (
-      let j =
-        m -
-        1;
-
-      j >=
-        0;
-
-      j -=
-        1
-    ) {
-
-      if (
-        normaliseMetadataWord(
-          words[
-            i
-          ]
-        ) ===
-        normaliseMetadataWord(
-          modelWords[
-            j
-          ].surface
-        )
-      ) {
-
-        dp[
-          i
-        ][
-          j
-        ] =
-          dp[
-            i +
-            1
-          ][
-            j +
-            1
-          ] +
-          1;
-
-      } else {
-
-        dp[
-          i
-        ][
-          j
-        ] =
-          Math.max(
-            dp[
-              i +
-              1
-            ][
-              j
-            ],
-            dp[
-              i
-            ][
-              j +
-              1
-            ]
-          );
-
-      }
-
-    }
-
-  }
+}
 
 
-  const aligned =
-    [];
+const n =
+words.length;
 
 
-  let i =
-    0;
+const m =
+modelWords.length;
 
 
-  let j =
-    0;
+const dp =
+Array.from(
+{
+length:
+n +
+1,
+},
+() =>
+Array(
+m +
+1
+).fill(
+0
+)
+);
 
 
-  while (
-    i <
-      n &&
-    j <
-      m
-  ) {
+for (
+let i =
+n -
+1;
 
-    if (
-      normaliseMetadataWord(
-        words[
-          i
-        ]
-      ) ===
-      normaliseMetadataWord(
-        modelWords[
-          j
-        ].surface
-      )
-    ) {
+i >=
+0;
 
-      aligned.push({
+i -=
+1
+) {
 
-        surface:
-          words[
-            i
-          ],
+for (
+let j =
+m -
+1;
 
-        lookup:
-          modelWords[
-            j
-          ].lookup,
+j >=
+0;
 
-        pos:
-          modelWords[
-            j
-          ].pos,
+j -=
+1
+) {
 
-      });
+if (
+normaliseMetadataWord(
+words[
+i
+]
+) ===
+normaliseMetadataWord(
+modelWords[
+j
+].surface
+)
+) {
+
+dp[
+i
+][
+j
+] =
+dp[
+i +
+1
+][
+j +
+1
+] +
+1;
+
+} else {
+
+dp[
+i
+][
+j
+] =
+Math.max(
+dp[
+i +
+1
+][
+j
+],
+dp[
+i
+][
+j +
+1
+]
+);
+
+}
+
+}
+
+}
 
 
-      i +=
-        1;
+const aligned =
+[];
 
 
-      j +=
-        1;
-
-    } else if (
-      dp[
-        i +
-        1
-      ][
-        j
-      ] >=
-      dp[
-        i
-      ][
-        j +
-        1
-      ]
-    ) {
-
-      i +=
-        1;
-
-    } else {
-
-      j +=
-        1;
-
-    }
-
-  }
+let i =
+0;
 
 
-  return aligned;
+let j =
+0;
+
+
+while (
+i <
+n &&
+j <
+m
+) {
+
+if (
+normaliseMetadataWord(
+words[
+i
+]
+) ===
+normaliseMetadataWord(
+modelWords[
+j
+].surface
+)
+) {
+
+aligned.push({
+
+surface:
+words[
+i
+],
+
+lookup:
+modelWords[
+j
+].lookup,
+
+pos:
+modelWords[
+j
+].pos,
+
+});
+
+
+i +=
+1;
+
+
+j +=
+1;
+
+} else if (
+dp[
+i +
+1
+][
+j
+] >=
+dp[
+i
+][
+j +
+1
+]
+) {
+
+i +=
+1;
+
+} else {
+
+j +=
+1;
+
+}
+
+}
+
+
+return aligned;
 
 }
 
 
 function resolveLearnerVocabularyItem(
-  surfaceWord,
-  language
+surfaceWord,
+language
 ) {
 
-  const dictionaryContext =
-    dictionaries.get(
-      language.id
-    );
+const dictionaryContext =
+dictionaries.get(
+language.id
+);
 
 
-  if (
-    !dictionaryContext
-  ) {
+if (
+!dictionaryContext
+) {
 
-    return null;
+return null;
 
-  }
-
-
-  const word =
-    cleanLookupWord(
-      surfaceWord
-    );
+}
 
 
-  if (
-    !word
-  ) {
-
-    return null;
-
-  }
+const word =
+cleanLookupWord(
+surfaceWord
+);
 
 
-  const rows =
-    dictionaryContext
-      .lookup
-      .all(
-        normalizeWord(
-          word,
-          language
-        )
-      );
+if (
+!word
+) {
+
+return null;
+
+}
 
 
-  if (
-    !rows.length
-  ) {
-
-    return null;
-
-  }
-
-
-  const orderedRows = [
-
-    ...rows.filter(
-      row =>
-        row.word ===
-        word
-    ),
-
-    ...rows.filter(
-      row =>
-        row.word !==
-        word
-    ),
-
-  ];
+const rows =
+dictionaryContext
+.lookup
+.all(
+normalizeWord(
+word,
+language
+)
+);
 
 
-  const row =
-    orderedRows[
-      0
-    ];
+if (
+!rows.length
+) {
+
+return null;
+
+}
 
 
-  const lemmas =
-    parseJsonArray(
-      row.lemmas
-    )
-      .filter(
-        lemma =>
-          typeof lemma ===
-            "string" &&
-          lemma.trim()
-      )
-      .map(
-        lemma =>
-          lemma.trim()
-      );
+const orderedRows = [
+
+...rows.filter(
+row =>
+row.word ===
+word
+),
+
+...rows.filter(
+row =>
+row.word !==
+word
+),
+
+];
 
 
-  let lemma =
-    lemmas[
-      0
-    ] ||
-    String(
-      row.word ||
-      word
-    ).trim();
+const row =
+orderedRows[
+0
+];
 
 
-  let partOfSpeech =
-    typeof row.pos ===
-      "string" &&
-    row.pos.trim()
-      ? row.pos.trim()
-      : null;
+const lemmas =
+parseJsonArray(
+row.lemmas
+)
+.filter(
+lemma =>
+typeof lemma ===
+"string" &&
+lemma.trim()
+)
+.map(
+lemma =>
+lemma.trim()
+);
 
 
-  if (
-    lemmas.length
-  ) {
-
-    const lemmaRows =
-      dictionaryContext
-        .lookup
-        .all(
-          normalizeWord(
-            lemma,
-            language
-          )
-        );
+let lemma =
+lemmas[
+0
+] ||
+String(
+row.word ||
+word
+).trim();
 
 
-    const preferred =
-      lemmaRows.find(
-        item =>
-          item.word ===
-            lemma &&
-          item.pos ===
-            row.pos
-      ) ||
-      lemmaRows.find(
-        item =>
-          item.pos ===
-          row.pos
-      ) ||
-      lemmaRows.find(
-        item =>
-          item.word ===
-          lemma
-      ) ||
-      lemmaRows[
-        0
-      ];
+let partOfSpeech =
+typeof row.pos ===
+"string" &&
+row.pos.trim()
+? row.pos.trim()
+: null;
 
 
-    if (
-      preferred
-    ) {
+if (
+lemmas.length
+) {
 
-      if (
-        typeof preferred.word ===
-          "string" &&
-        preferred.word.trim()
-      ) {
-
-        lemma =
-          preferred.word.trim();
-
-      }
-
-
-      if (
-        typeof preferred.pos ===
-          "string" &&
-        preferred.pos.trim()
-      ) {
-
-        partOfSpeech =
-          preferred.pos.trim();
-
-      }
-
-    }
-
-  }
+const lemmaRows =
+dictionaryContext
+.lookup
+.all(
+normalizeWord(
+lemma,
+language
+)
+);
 
 
-  if (
-    !lemma
-  ) {
+const preferred =
+lemmaRows.find(
+item =>
+item.word ===
+lemma &&
+item.pos ===
+row.pos
+) ||
+lemmaRows.find(
+item =>
+item.pos ===
+row.pos
+) ||
+lemmaRows.find(
+item =>
+item.word ===
+lemma
+) ||
+lemmaRows[
+0
+];
 
-    return null;
 
-  }
+if (
+preferred
+) {
+
+if (
+typeof preferred.word ===
+"string" &&
+preferred.word.trim()
+) {
+
+lemma =
+preferred.word.trim();
+
+}
 
 
-  return {
+if (
+typeof preferred.pos ===
+"string" &&
+preferred.pos.trim()
+) {
 
-    lemma,
+partOfSpeech =
+preferred.pos.trim();
 
-    lemma_key:
-      normalizeWord(
-        lemma,
-        language
-      ),
+}
 
-    part_of_speech:
-      partOfSpeech &&
-      partOfSpeech !==
-        "unknown"
-          ? partOfSpeech
-          : null,
+}
 
-  };
+}
+
+
+if (
+!lemma
+) {
+
+return null;
+
+}
+
+
+return {
+
+lemma,
+
+lemma_key:
+normalizeWord(
+lemma,
+language
+),
+
+part_of_speech:
+partOfSpeech &&
+partOfSpeech !==
+"unknown"
+? partOfSpeech
+: null,
+
+};
 
 }
 
 
 function extractLearnerVocabulary(
-  message,
-  language
+message,
+language
 ) {
 
-  const byLemma =
-    new Map();
+const byLemma =
+new Map();
 
 
-  for (
-    const word
-    of extractWordTokens(
-      message
-    )
-  ) {
+for (
+const word
+of extractWordTokens(
+message
+)
+) {
 
-    const item =
-      resolveLearnerVocabularyItem(
-        word,
-        language
-      );
-
-
-    if (
-      !item
-    ) {
-
-      continue;
-
-    }
+const item =
+resolveLearnerVocabularyItem(
+word,
+language
+);
 
 
-    const existing =
-      byLemma.get(
-        item.lemma_key
-      );
+if (
+!item
+) {
+
+continue;
+
+}
 
 
-    if (
-      !existing
-    ) {
-
-      byLemma.set(
-        item.lemma_key,
-        item
-      );
-
-    } else if (
-      (
-        !existing.part_of_speech ||
-        existing.part_of_speech ===
-          "other"
-      ) &&
-      item.part_of_speech &&
-      item.part_of_speech !==
-        "other"
-    ) {
-
-      byLemma.set(
-        item.lemma_key,
-        {
-
-          ...existing,
-
-          part_of_speech:
-            item.part_of_speech,
-
-        }
-      );
-
-    }
-
-  }
+const existing =
+byLemma.get(
+item.lemma_key
+);
 
 
-  return [
-    ...byLemma.values(),
-  ];
+if (
+!existing
+) {
+
+byLemma.set(
+item.lemma_key,
+item
+);
+
+} else if (
+(
+!existing.part_of_speech ||
+existing.part_of_speech ===
+"other"
+) &&
+item.part_of_speech &&
+item.part_of_speech !==
+"other"
+) {
+
+byLemma.set(
+item.lemma_key,
+{
+
+...existing,
+
+part_of_speech:
+item.part_of_speech,
+
+}
+);
+
+}
+
+}
+
+
+return [
+...byLemma.values(),
+];
 
 }
 
@@ -3305,787 +3926,787 @@ function extractLearnerVocabulary(
 
 
 function shuffle(
-  values
+values
 ) {
 
-  const array = [
-    ...values,
-  ];
+const array = [
+...values,
+];
 
 
-  for (
-    let i =
-      array.length -
-      1;
+for (
+let i =
+array.length -
+1;
 
-    i >
-      0;
+i >
+0;
 
-    i -=
-      1
-  ) {
+i -=
+1
+) {
 
-    const j =
-      Math.floor(
-        Math.random() *
-        (
-          i +
-          1
-        )
-      );
-
-
-    [
-      array[
-        i
-      ],
-      array[
-        j
-      ],
-    ] = [
-      array[
-        j
-      ],
-      array[
-        i
-      ],
-    ];
-
-  }
+const j =
+Math.floor(
+Math.random() *
+(
+i +
+1
+)
+);
 
 
-  return array;
+[
+array[
+i
+],
+array[
+j
+],
+] = [
+array[
+j
+],
+array[
+i
+],
+];
+
+}
+
+
+return array;
 
 }
 
 
 function exactAnswerKey(
-  value
+value
 ) {
 
-  return String(
-    value ||
-    ""
-  )
-    .trim()
-    .normalize(
-      "NFC"
-    );
+return String(
+value ||
+""
+)
+.trim()
+.normalize(
+"NFC"
+);
 
 }
 
 
 function makeTestItemFromRow(
-  row,
-  language
+row,
+language
 ) {
 
-  if (
-    !row ||
-    typeof row.word !==
-      "string" ||
-    !row.word.trim()
-  ) {
+if (
+!row ||
+typeof row.word !==
+"string" ||
+!row.word.trim()
+) {
 
-    return null;
+return null;
 
-  }
-
-
-  const senses =
-    normaliseSenseList(
-      row.senses
-    );
+}
 
 
-  if (
-    !senses.length
-  ) {
-
-    return null;
-
-  }
+const senses =
+normaliseSenseList(
+row.senses
+);
 
 
-  const dictionaryLemmas =
-    parseJsonArray(
-      row.lemmas
-    )
-      .filter(
-        lemma =>
-          typeof lemma ===
-            "string" &&
-          lemma.trim()
-      )
-      .map(
-        lemma =>
-          lemma.trim()
-      );
+if (
+!senses.length
+) {
+
+return null;
+
+}
 
 
-  const rawAnswers =
-    dictionaryLemmas.length
-      ? dictionaryLemmas
-      : [
-          row.word.trim(),
-        ];
+const dictionaryLemmas =
+parseJsonArray(
+row.lemmas
+)
+.filter(
+lemma =>
+typeof lemma ===
+"string" &&
+lemma.trim()
+)
+.map(
+lemma =>
+lemma.trim()
+);
 
 
-  const acceptedAnswers =
-    [];
+const rawAnswers =
+dictionaryLemmas.length
+? dictionaryLemmas
+: [
+row.word.trim(),
+];
 
 
-  const seen =
-    new Set();
+const acceptedAnswers =
+[];
 
 
-  for (
-    const answer
-    of rawAnswers
-  ) {
-
-    const key =
-      exactAnswerKey(
-        answer
-      );
+const seen =
+new Set();
 
 
-    if (
-      !key ||
-      seen.has(
-        key
-      )
-    ) {
+for (
+const answer
+of rawAnswers
+) {
 
-      continue;
-
-    }
-
-
-    seen.add(
-      key
-    );
+const key =
+exactAnswerKey(
+answer
+);
 
 
-    acceptedAnswers.push(
-      answer
-    );
+if (
+!key ||
+seen.has(
+key
+)
+) {
 
-  }
+continue;
 
-
-  if (
-    !acceptedAnswers.length
-  ) {
-
-    return null;
-
-  }
+}
 
 
-  const primaryLemma =
-    acceptedAnswers[
-      0
-    ];
+seen.add(
+key
+);
 
 
-  return {
+acceptedAnswers.push(
+answer
+);
 
-    prompt:
-      senses[
-        0
-      ].meaning,
+}
 
-    primaryLemma,
 
-    acceptedAnswers,
+if (
+!acceptedAnswers.length
+) {
 
-    lemmaKey:
-      normalizeWord(
-        primaryLemma,
-        language
-      ),
+return null;
 
-    partOfSpeech:
-      typeof row.pos ===
-        "string" &&
-      row.pos.trim() &&
-      row.pos !==
-        "unknown"
-          ? row.pos.trim()
-          : null,
+}
 
-  };
+
+const primaryLemma =
+acceptedAnswers[
+0
+];
+
+
+return {
+
+prompt:
+senses[
+0
+].meaning,
+
+primaryLemma,
+
+acceptedAnswers,
+
+lemmaKey:
+normalizeWord(
+primaryLemma,
+language
+),
+
+partOfSpeech:
+typeof row.pos ===
+"string" &&
+row.pos.trim() &&
+row.pos !==
+"unknown"
+? row.pos.trim()
+: null,
+
+};
 
 }
 
 
 function resolveTestItemFromWord(
-  word,
-  language,
-  {
-    preferStoredLemma =
-      false,
-  } =
-    {}
+word,
+language,
+{
+preferStoredLemma =
+false,
+} =
+{}
 ) {
 
-  const dictionaryContext =
-    dictionaries.get(
-      language.id
-    );
+const dictionaryContext =
+dictionaries.get(
+language.id
+);
 
 
-  if (
-    !dictionaryContext
-  ) {
+if (
+!dictionaryContext
+) {
 
-    return null;
+return null;
 
-  }
-
-
-  const cleaned =
-    cleanLookupWord(
-      word
-    );
+}
 
 
-  if (
-    !cleaned
-  ) {
-
-    return null;
-
-  }
+const cleaned =
+cleanLookupWord(
+word
+);
 
 
-  const rows =
-    dictionaryContext
-      .lookup
-      .all(
-        normalizeWord(
-          cleaned,
-          language
-        )
-      );
+if (
+!cleaned
+) {
+
+return null;
+
+}
 
 
-  if (
-    !rows.length
-  ) {
-
-    return null;
-
-  }
-
-
-  const ordered = [
-
-    ...rows.filter(
-      row =>
-        row.word ===
-        cleaned
-    ),
-
-    ...rows.filter(
-      row =>
-        row.word !==
-        cleaned
-    ),
-
-  ];
+const rows =
+dictionaryContext
+.lookup
+.all(
+normalizeWord(
+cleaned,
+language
+)
+);
 
 
-  for (
-    const row
-    of ordered
-  ) {
+if (
+!rows.length
+) {
 
-    const item =
-      makeTestItemFromRow(
-        row,
-        language
-      );
+return null;
+
+}
 
 
-    if (
-      !item
-    ) {
+const ordered = [
 
-      continue;
+...rows.filter(
+row =>
+row.word ===
+cleaned
+),
 
-    }
+...rows.filter(
+row =>
+row.word !==
+cleaned
+),
 
-
-    if (
-      preferStoredLemma
-    ) {
-
-      const stored =
-        cleaned.normalize(
-          "NFC"
-        );
+];
 
 
-      item.acceptedAnswers = [
-        stored,
-        ...item.acceptedAnswers,
-      ].filter(
-        (
-          answer,
-          index,
-          arr
-        ) =>
-          arr.findIndex(
-            candidate =>
-              exactAnswerKey(
-                candidate
-              ) ===
-              exactAnswerKey(
-                answer
-              )
-          ) ===
-          index
-      );
+for (
+const row
+of ordered
+) {
+
+const item =
+makeTestItemFromRow(
+row,
+language
+);
 
 
-      item.primaryLemma =
-        stored;
+if (
+!item
+) {
+
+continue;
+
+}
 
 
-      item.lemmaKey =
-        normalizeWord(
-          stored,
-          language
-        );
+if (
+preferStoredLemma
+) {
 
-    }
-
-
-    return item;
-
-  }
+const stored =
+cleaned.normalize(
+"NFC"
+);
 
 
-  return null;
+item.acceptedAnswers = [
+stored,
+...item.acceptedAnswers,
+].filter(
+(
+answer,
+index,
+arr
+) =>
+arr.findIndex(
+candidate =>
+exactAnswerKey(
+candidate
+) ===
+exactAnswerKey(
+answer
+)
+) ===
+index
+);
+
+
+item.primaryLemma =
+stored;
+
+
+item.lemmaKey =
+normalizeWord(
+stored,
+language
+);
+
+}
+
+
+return item;
+
+}
+
+
+return null;
 
 }
 
 
 function getRandomDictionaryTestItems(
-  language,
-  count,
-  excludeKeys =
-    new Set()
+language,
+count,
+excludeKeys =
+new Set()
 ) {
 
-  const dictionaryContext =
-    dictionaries.get(
-      language.id
-    );
+const dictionaryContext =
+dictionaries.get(
+language.id
+);
 
 
-  if (
-    !dictionaryContext
-  ) {
+if (
+!dictionaryContext
+) {
 
-    return [];
+return [];
 
-  }
-
-
-  const items =
-    [];
+}
 
 
-  const seen =
-    new Set(
-      excludeKeys
-    );
+const items =
+[];
 
 
-  const maxAttempts =
-    Math.max(
-      200,
-      count *
-      80
-    );
+const seen =
+new Set(
+excludeKeys
+);
 
 
-  let attempts =
-    0;
+const maxAttempts =
+Math.max(
+200,
+count *
+80
+);
 
 
-  while (
-    items.length <
-      count &&
-    attempts <
-      maxAttempts
-  ) {
-
-    attempts +=
-      1;
+let attempts =
+0;
 
 
-    let row =
-      null;
+while (
+items.length <
+count &&
+attempts <
+maxAttempts
+) {
+
+attempts +=
+1;
 
 
-    if (
-      dictionaryContext.randomFromRowid &&
-      dictionaryContext.maxRowid >
-        0
-    ) {
-
-      const target =
-        1 +
-        Math.floor(
-          Math.random() *
-          dictionaryContext.maxRowid
-        );
+let row =
+null;
 
 
-      row =
-        dictionaryContext
-          .randomFromRowid
-          .get(
-            target
-          ) ||
-        null;
+if (
+dictionaryContext.randomFromRowid &&
+dictionaryContext.maxRowid >
+0
+) {
 
-    } else {
-
-      row =
-        dictionaryContext
-          .fallbackRandom
-          .all(
-            1
-          )?.[
-            0
-          ] ||
-        null;
-
-    }
+const target =
+1 +
+Math.floor(
+Math.random() *
+dictionaryContext.maxRowid
+);
 
 
-    const item =
-      makeTestItemFromRow(
-        row,
-        language
-      );
+row =
+dictionaryContext
+.randomFromRowid
+.get(
+target
+) ||
+null;
+
+} else {
+
+row =
+dictionaryContext
+.fallbackRandom
+.all(
+1
+)?.[
+0
+] ||
+null;
+
+}
 
 
-    if (
-      !item ||
-      seen.has(
-        item.lemmaKey
-      )
-    ) {
-
-      continue;
-
-    }
+const item =
+makeTestItemFromRow(
+row,
+language
+);
 
 
-    seen.add(
-      item.lemmaKey
-    );
+if (
+!item ||
+seen.has(
+item.lemmaKey
+)
+) {
+
+continue;
+
+}
 
 
-    items.push(
-      item
-    );
-
-  }
+seen.add(
+item.lemmaKey
+);
 
 
-  return items;
+items.push(
+item
+);
+
+}
+
+
+return items;
 
 }
 
 
 async function chooseNewVocabularyWithAI(
-  language,
-  knownRows,
-  count
+language,
+knownRows,
+count
 ) {
 
-  const candidateCount =
-    Math.min(
-      60,
-      Math.max(
-        count *
-        3,
-        count +
-        10
-      )
-    );
+const candidateCount =
+Math.min(
+60,
+Math.max(
+count *
+3,
+count +
+10
+)
+);
 
 
-  const known =
-    knownRows
-      .map(
-        row =>
-          row.lemma
-      )
-      .filter(
-        Boolean
-      );
+const known =
+knownRows
+.map(
+row =>
+row.lemma
+)
+.filter(
+Boolean
+);
 
 
-  const parsed =
-    await createStructuredResponse({
+const parsed =
+await createStructuredResponse({
 
-      input: [
+input: [
 
-        {
+{
 
-          role:
-            "system",
+role:
+"system",
 
-          content:
-            `You select useful next vocabulary for a language learner. Return only dictionary-style single-word lemmas/headwords. Avoid proper nouns, phrases, obscure words, and anything already in the learner's known list. Prefer broadly useful everyday vocabulary. The target language is ${language.aiLanguageName}.`,
+content:
+`You select useful next vocabulary for a language learner. Return only dictionary-style single-word lemmas/headwords. Avoid proper nouns, phrases, obscure words, and anything already in the learner's known list. Prefer broadly useful everyday vocabulary. The target language is ${language.aiLanguageName}.`,
 
-        },
+},
 
-        {
+{
 
-          role:
-            "user",
+role:
+"user",
 
-          content:
-            `Choose ${candidateCount} candidate ${language.aiLanguageName} words that would be sensible for this learner to learn next. Their currently recorded vocabulary is:\n${JSON.stringify(known)}`,
+content:
+`Choose ${candidateCount} candidate ${language.aiLanguageName} words that would be sensible for this learner to learn next. Their currently recorded vocabulary is:\n${JSON.stringify(known)}`,
 
-        },
+},
 
-      ],
+],
 
-      schema:
-        makeNewVocabularySchema(
-          candidateCount
-        ),
+schema:
+makeNewVocabularySchema(
+candidateCount
+),
 
-      schemaName:
-        "plainbetter_new_vocabulary_selection",
+schemaName:
+"plainbetter_new_vocabulary_selection",
 
-      maxOutputTokens:
-        1200,
+maxOutputTokens:
+1200,
 
-    });
-
-
-  const knownKeys =
-    new Set(
-      knownRows.map(
-        row =>
-          normalizeWord(
-            row.lemma_key ||
-            row.lemma,
-            language
-          )
-      )
-    );
+});
 
 
-  const selected =
-    [];
+const knownKeys =
+new Set(
+knownRows.map(
+row =>
+normalizeWord(
+row.lemma_key ||
+row.lemma,
+language
+)
+)
+);
 
 
-  const selectedKeys =
-    new Set();
+const selected =
+[];
 
 
-  for (
-    const word
-    of parsed.words ||
-    []
-  ) {
-
-    if (
-      selected.length >=
-      count
-    ) {
-
-      break;
-
-    }
+const selectedKeys =
+new Set();
 
 
-    const item =
-      resolveTestItemFromWord(
-        word,
-        language
-      );
+for (
+const word
+of parsed.words ||
+[]
+) {
+
+if (
+selected.length >=
+count
+) {
+
+break;
+
+}
 
 
-    if (
-      !item ||
-      knownKeys.has(
-        item.lemmaKey
-      ) ||
-      selectedKeys.has(
-        item.lemmaKey
-      )
-    ) {
-
-      continue;
-
-    }
+const item =
+resolveTestItemFromWord(
+word,
+language
+);
 
 
-    selectedKeys.add(
-      item.lemmaKey
-    );
+if (
+!item ||
+knownKeys.has(
+item.lemmaKey
+) ||
+selectedKeys.has(
+item.lemmaKey
+)
+) {
+
+continue;
+
+}
 
 
-    selected.push(
-      item
-    );
-
-  }
+selectedKeys.add(
+item.lemmaKey
+);
 
 
-  return selected;
+selected.push(
+item
+);
+
+}
+
+
+return selected;
 
 }
 
 
 function addMultipleChoiceOptions(
-  items,
-  language
+items,
+language
 ) {
 
-  const allPrimary =
-    items.map(
-      item =>
-        item.primaryLemma
-    );
+const allPrimary =
+items.map(
+item =>
+item.primaryLemma
+);
 
 
-  for (
-    const item
-    of items
-  ) {
+for (
+const item
+of items
+) {
 
-    const options =
-      new Set([
-        item.primaryLemma,
-      ]);
-
-
-    for (
-      const candidate
-      of shuffle(
-        allPrimary
-      )
-    ) {
-
-      if (
-        options.size >=
-        4
-      ) {
-
-        break;
-
-      }
+const options =
+new Set([
+item.primaryLemma,
+]);
 
 
-      if (
-        candidate !==
-        item.primaryLemma
-      ) {
+for (
+const candidate
+of shuffle(
+allPrimary
+)
+) {
 
-        options.add(
-          candidate
-        );
+if (
+options.size >=
+4
+) {
 
-      }
+break;
 
-    }
-
-
-    let extraAttempts =
-      0;
-
-
-    while (
-      options.size <
-        4 &&
-      extraAttempts <
-        30
-    ) {
-
-      extraAttempts +=
-        1;
+}
 
 
-      const extras =
-        getRandomDictionaryTestItems(
-          language,
-          1
-        );
+if (
+candidate !==
+item.primaryLemma
+) {
+
+options.add(
+candidate
+);
+
+}
+
+}
 
 
-      if (
-        !extras.length
-      ) {
-
-        break;
-
-      }
+let extraAttempts =
+0;
 
 
-      options.add(
-        extras[
-          0
-        ].primaryLemma
-      );
+while (
+options.size <
+4 &&
+extraAttempts <
+30
+) {
 
-    }
+extraAttempts +=
+1;
 
 
-    item.options =
-      shuffle([
-        ...options,
-      ]);
+const extras =
+getRandomDictionaryTestItems(
+language,
+1
+);
 
-  }
+
+if (
+!extras.length
+) {
+
+break;
+
+}
+
+
+options.add(
+extras[
+0
+].primaryLemma
+);
+
+}
+
+
+item.options =
+shuffle([
+...options,
+]);
+
+}
 
 }
 
 
 const vocabTestSessions =
-  new Map();
+new Map();
 
 
 function cleanupVocabTestSessions() {
 
-  const now =
-    Date.now();
+const now =
+Date.now();
 
 
-  for (
-    const [
-      testId,
-      testSession,
-    ]
-    of vocabTestSessions.entries()
-  ) {
+for (
+const [
+testId,
+testSession,
+]
+of vocabTestSessions.entries()
+) {
 
-    if (
-      now -
-      testSession.createdAt >
-      VOCAB_TEST_TTL_MS
-    ) {
+if (
+now -
+testSession.createdAt >
+VOCAB_TEST_TTL_MS
+) {
 
-      vocabTestSessions.delete(
-        testId
-      );
+vocabTestSessions.delete(
+testId
+);
 
-    }
+}
 
-  }
+}
 
 }
 
@@ -4096,329 +4717,329 @@ function cleanupVocabTestSessions() {
 
 
 class AIOutputError
-  extends Error {
+extends Error {
 
-  constructor(
-    message,
-    code =
-      "invalid_output"
-  ) {
+constructor(
+message,
+code =
+"invalid_output"
+) {
 
-    super(
-      message
-    );
-
-
-    this.name =
-      "AIOutputError";
+super(
+message
+);
 
 
-    this.code =
-      code;
+this.name =
+"AIOutputError";
 
-  }
+
+this.code =
+code;
+
+}
 
 }
 
 
 function responseContainsRefusal(
-  response
+response
 ) {
 
-  return Array.isArray(
-    response?.output
-  )
-    ? response.output.some(
-        item =>
-          Array.isArray(
-            item?.content
-          )
-            ? item.content.some(
-                content =>
-                  content?.type ===
-                  "refusal"
-              )
-            : false
-      )
-    : false;
+return Array.isArray(
+response?.output
+)
+? response.output.some(
+item =>
+Array.isArray(
+item?.content
+)
+? item.content.some(
+content =>
+content?.type ===
+"refusal"
+)
+: false
+)
+: false;
 
 }
 
 
 async function createStructuredResponse({
-  input,
-  schema,
-  schemaName,
-  maxOutputTokens,
+input,
+schema,
+schemaName,
+maxOutputTokens,
 }) {
 
-  const response =
-    await openai.responses.create({
+const response =
+await openai.responses.create({
 
-      model:
-        MODEL,
+model:
+MODEL,
 
-      input,
+input,
 
-      reasoning: {
-        effort:
-          "none",
-      },
+reasoning: {
+effort:
+"none",
+},
 
-      max_output_tokens:
-        maxOutputTokens,
+max_output_tokens:
+maxOutputTokens,
 
-      store:
-        false,
+store:
+false,
 
-      text: {
+text: {
 
-        format: {
+format: {
 
-          type:
-            "json_schema",
+type:
+"json_schema",
 
-          name:
-            schemaName,
+name:
+schemaName,
 
-          schema,
+schema,
 
-          strict:
-            true,
+strict:
+true,
 
-        },
+},
 
-      },
+},
 
-    });
-
-
-  if (
-    response.status ===
-    "incomplete"
-  ) {
-
-    throw new AIOutputError(
-      "The AI response was cut off before it completed.",
-      "incomplete"
-    );
-
-  }
+});
 
 
-  if (
-    responseContainsRefusal(
-      response
-    )
-  ) {
+if (
+response.status ===
+"incomplete"
+) {
 
-    throw new AIOutputError(
-      "The AI declined to complete the request.",
-      "refusal"
-    );
+throw new AIOutputError(
+"The AI response was cut off before it completed.",
+"incomplete"
+);
 
-  }
-
-
-  if (
-    !response.output_text
-  ) {
-
-    throw new AIOutputError(
-      "The AI returned an empty response.",
-      "empty"
-    );
-
-  }
+}
 
 
-  try {
+if (
+responseContainsRefusal(
+response
+)
+) {
 
-    return JSON.parse(
-      response.output_text
-    );
+throw new AIOutputError(
+"The AI declined to complete the request.",
+"refusal"
+);
 
-  } catch (
-    error
-  ) {
-
-    console.error(
-      "Could not parse structured AI output",
-      {
-
-        message:
-          error?.message,
-
-        outputPreview:
-          response.output_text.slice(
-            0,
-            500
-          ),
-
-      }
-    );
+}
 
 
-    throw new AIOutputError(
-      "The AI returned an invalid structured response.",
-      "invalid_json"
-    );
+if (
+!response.output_text
+) {
 
-  }
+throw new AIOutputError(
+"The AI returned an empty response.",
+"empty"
+);
+
+}
+
+
+try {
+
+return JSON.parse(
+response.output_text
+);
+
+} catch (
+error
+) {
+
+console.error(
+"Could not parse structured AI output",
+{
+
+message:
+error?.message,
+
+outputPreview:
+response.output_text.slice(
+0,
+500
+),
+
+}
+);
+
+
+throw new AIOutputError(
+"The AI returned an invalid structured response.",
+"invalid_json"
+);
+
+}
 
 }
 
 
 function sendAIError(
-  res,
-  error
+res,
+error
 ) {
 
-  if (
-    error instanceof
-    AIOutputError
-  ) {
+if (
+error instanceof
+AIOutputError
+) {
 
-    if (
-      error.code ===
-      "incomplete"
-    ) {
+if (
+error.code ===
+"incomplete"
+) {
 
-      return res
-        .status(
-          502
-        )
-        .json({
+return res
+.status(
+502
+)
+.json({
 
-          error:
-            "The AI response was cut off before it completed. Please try again.",
+error:
+"The AI response was cut off before it completed. Please try again.",
 
-        });
+});
 
-    }
-
-
-    if (
-      error.code ===
-      "refusal"
-    ) {
-
-      return res
-        .status(
-          502
-        )
-        .json({
-
-          error:
-            "The AI could not complete that request. Please try a different request.",
-
-        });
-
-    }
+}
 
 
-    if (
-      error.code ===
-      "empty"
-    ) {
+if (
+error.code ===
+"refusal"
+) {
 
-      return res
-        .status(
-          502
-        )
-        .json({
+return res
+.status(
+502
+)
+.json({
 
-          error:
-            "The AI returned an empty response. Please try again.",
+error:
+"The AI could not complete that request. Please try a different request.",
 
-        });
+});
 
-    }
-
-
-    return res
-      .status(
-        502
-      )
-      .json({
-
-        error:
-          "The AI returned an invalid response. Please try again.",
-
-      });
-
-  }
+}
 
 
-  const status =
-    error?.status;
+if (
+error.code ===
+"empty"
+) {
+
+return res
+.status(
+502
+)
+.json({
+
+error:
+"The AI returned an empty response. Please try again.",
+
+});
+
+}
 
 
-  console.error(
-    "OpenAI request failed",
-    {
+return res
+.status(
+502
+)
+.json({
 
-      status,
+error:
+"The AI returned an invalid response. Please try again.",
 
-      requestId:
-        error?.request_id ||
-        error?.requestID,
+});
 
-      message:
-        error?.message,
-
-    }
-  );
+}
 
 
-  if (
-    status ===
-    401
-  ) {
-
-    return res
-      .status(
-        502
-      )
-      .json({
-
-        error:
-          "The backend could not authenticate with OpenAI.",
-
-      });
-
-  }
+const status =
+error?.status;
 
 
-  if (
-    status ===
-    429
-  ) {
+console.error(
+"OpenAI request failed",
+{
 
-    return res
-      .status(
-        503
-      )
-      .json({
+status,
 
-        error:
-          "The AI service is temporarily rate-limited. Please try again shortly.",
+requestId:
+error?.request_id ||
+error?.requestID,
 
-      });
+message:
+error?.message,
 
-  }
+}
+);
 
 
-  return res
-    .status(
-      502
-    )
-    .json({
+if (
+status ===
+401
+) {
 
-      error:
-        "The AI service could not complete the request. Please try again.",
+return res
+.status(
+502
+)
+.json({
 
-    });
+error:
+"The backend could not authenticate with OpenAI.",
+
+});
+
+}
+
+
+if (
+status ===
+429
+) {
+
+return res
+.status(
+503
+)
+.json({
+
+error:
+"The AI service is temporarily rate-limited. Please try again shortly.",
+
+});
+
+}
+
+
+return res
+.status(
+502
+)
+.json({
+
+error:
+"The AI service could not complete the request. Please try again.",
+
+});
 
 }
 
@@ -4429,53 +5050,100 @@ function sendAIError(
 
 
 app.use(
-  (
-    req,
-    res,
-    next
-  ) => {
+(
+req,
+res,
+next
+) => {
 
-    res.setHeader(
-      "Access-Control-Allow-Origin",
-      "*"
-    );
-
-
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET,POST,OPTIONS"
-    );
+res.setHeader(
+"Access-Control-Allow-Origin",
+"*"
+);
 
 
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization"
-    );
+res.setHeader(
+"Access-Control-Allow-Methods",
+"GET,POST,OPTIONS"
+);
 
 
-    if (
-      req.method ===
-      "OPTIONS"
-    ) {
-
-      return res.sendStatus(
-        204
-      );
-
-    }
+res.setHeader(
+"Access-Control-Allow-Headers",
+"Content-Type, Authorization"
+);
 
 
-    next();
+if (
+req.method ===
+"OPTIONS"
+) {
 
-  }
+return res.sendStatus(
+204
+);
+
+}
+
+
+next();
+
+}
 );
 
 
 app.use(
-  express.json({
-    limit:
-      "200kb",
-  })
+(
+req,
+res,
+next
+) => {
+
+const allowed =
+applyFixedWindowLimit({
+
+store:
+globalRateLimitStore,
+
+key:
+getClientIp(
+req
+),
+
+limit:
+GLOBAL_REQUESTS_PER_MINUTE,
+
+windowMs:
+ONE_MINUTE_MS,
+
+res,
+
+message:
+"Too many requests. Please wait a moment and try again.",
+
+});
+
+
+if (
+!allowed
+) {
+
+return;
+
+}
+
+
+next();
+
+}
+);
+
+
+app.use(
+express.json({
+limit:
+"200kb",
+})
 );
 
 
@@ -4485,300 +5153,300 @@ app.use(
 
 
 app.get(
-  "/",
-  (
-    req,
-    res
-  ) => {
+"/",
+(
+req,
+res
+) => {
 
-    res.json({
+res.json({
 
-      service:
-        "AI Language Learning Backend",
+service:
+"AI Language Learning Backend",
 
-      status:
-        "running",
+status:
+"running",
 
-    });
+});
 
-  }
+}
 );
 
 
 app.get(
-  "/api/me",
-  async (
-    req,
-    res
-  ) => {
+"/api/me",
+async (
+req,
+res
+) => {
 
-    const header =
-      getAuthorizationHeader(
-        req
-      );
-
-
-    if (
-      !header
-    ) {
-
-      return res.json({
-
-        authenticated:
-          false,
-
-        user:
-          null,
-
-      });
-
-    }
+const header =
+getAuthorizationHeader(
+req
+);
 
 
-    const accessToken =
-      getBearerToken(
-        header
-      );
+if (
+!header
+) {
+
+return res.json({
+
+authenticated:
+false,
+
+user:
+null,
+
+});
+
+}
 
 
-    if (
-      !accessToken
-    ) {
-
-      return res
-        .status(
-          401
-        )
-        .json({
-
-          authenticated:
-            false,
-
-          user:
-            null,
-
-          error:
-            "Authorization header must use a Bearer access token.",
-
-        });
-
-    }
+const accessToken =
+getBearerToken(
+header
+);
 
 
-    const verification =
-      await verifySupabaseAccessToken(
-        accessToken
-      );
+if (
+!accessToken
+) {
+
+return res
+.status(
+401
+)
+.json({
+
+authenticated:
+false,
+
+user:
+null,
+
+error:
+"Authorization header must use a Bearer access token.",
+
+});
+
+}
 
 
-    if (
-      verification.status ===
-      "invalid"
-    ) {
-
-      return res
-        .status(
-          401
-        )
-        .json({
-
-          authenticated:
-            false,
-
-          user:
-            null,
-
-          error:
-            "The Supabase access token is invalid or expired.",
-
-        });
-
-    }
+const verification =
+await verifySupabaseAccessToken(
+accessToken
+);
 
 
-    if (
-      verification.status ===
-      "unavailable"
-    ) {
+if (
+verification.status ===
+"invalid"
+) {
 
-      return res
-        .status(
-          503
-        )
-        .json({
+return res
+.status(
+401
+)
+.json({
 
-          authenticated:
-            false,
+authenticated:
+false,
 
-          user:
-            null,
+user:
+null,
 
-          error:
-            "Authentication verification is temporarily unavailable.",
+error:
+"The Supabase access token is invalid or expired.",
 
-        });
+});
 
-    }
+}
 
 
-    return res.json({
+if (
+verification.status ===
+"unavailable"
+) {
 
-      authenticated:
-        true,
+return res
+.status(
+503
+)
+.json({
 
-      user:
-        verification.user,
+authenticated:
+false,
 
-    });
+user:
+null,
 
-  }
+error:
+"Authentication verification is temporarily unavailable.",
+
+});
+
+}
+
+
+return res.json({
+
+authenticated:
+true,
+
+user:
+verification.user,
+
+});
+
+}
 );
 
 
 app.get(
-  "/health",
-  (
-    req,
-    res
-  ) => {
+"/health",
+(
+req,
+res
+) => {
 
-    const dictionaryStatus =
-      {};
-
-
-    for (
-      const language
-      of Object.values(
-        LANGUAGES
-      )
-    ) {
-
-      dictionaryStatus[
-        language.id
-      ] =
-        !languageHasDictionary(
-          language
-        )
-          ? "not-configured"
-          : dictionaries.has(
-              language.id
-            )
-            ? "ready"
-            : "unavailable";
-
-    }
+const dictionaryStatus =
+{};
 
 
-    res.json({
+for (
+const language
+of Object.values(
+LANGUAGES
+)
+) {
 
-      status:
-        "ok",
+dictionaryStatus[
+language.id
+] =
+!languageHasDictionary(
+language
+)
+? "not-configured"
+: dictionaries.has(
+language.id
+)
+? "ready"
+: "unavailable";
 
-      vocabularyStorage:
-        SUPABASE_DATABASE_CONFIGURED
-          ? "configured"
-          : "unavailable",
+}
 
-      dictionaries:
-        dictionaryStatus,
 
-    });
+res.json({
 
-  }
+status:
+"ok",
+
+vocabularyStorage:
+SUPABASE_DATABASE_CONFIGURED
+? "configured"
+: "unavailable",
+
+dictionaries:
+dictionaryStatus,
+
+});
+
+}
 );
 
 
 app.get(
-  "/api/config",
-  (
-    req,
-    res
-  ) => {
+"/api/config",
+(
+req,
+res
+) => {
 
-    res.json({
+res.json({
 
-      languages:
-        Object.values(
-          LANGUAGES
-        ).map(
-          language => ({
+languages:
+Object.values(
+LANGUAGES
+).map(
+language => ({
 
-            id:
-              language.id,
+id:
+language.id,
 
-            name:
-              language.name,
+name:
+language.name,
 
-            direction:
-              language.direction ||
-              "ltr",
+direction:
+language.direction ||
+"ltr",
 
-            specialCharacters:
-              Array.isArray(
-                language.specialCharacters
-              )
-                ? language.specialCharacters
-                : [],
+specialCharacters:
+Array.isArray(
+language.specialCharacters
+)
+? language.specialCharacters
+: [],
 
-            dictionaryEnabled:
-              languageHasDictionary(
-                language
-              ) &&
-              dictionaries.has(
-                language.id
-              ),
+dictionaryEnabled:
+languageHasDictionary(
+language
+) &&
+dictionaries.has(
+language.id
+),
 
-          })
-        ),
+})
+),
 
-      levels:
-        Object.values(
-          LEVELS
-        ).map(
-          level => ({
+levels:
+Object.values(
+LEVELS
+).map(
+level => ({
 
-            id:
-              level.id,
+id:
+level.id,
 
-            name:
-              level.name,
+name:
+level.name,
 
-          })
-        ),
+})
+),
 
-      defaultLevel:
-        "b1",
+defaultLevel:
+"b1",
 
-      scenarios:
-        Object.entries(
-          SCENARIOS
-        ).map(
-          ([
-            id,
-            scenario,
-          ]) => ({
+scenarios:
+Object.entries(
+SCENARIOS
+).map(
+([
+id,
+scenario,
+]) => ({
 
-            id,
+id,
 
-            name:
-              scenario.name,
+name:
+scenario.name,
 
-          })
-        ),
+})
+),
 
-      limits: {
+limits: {
 
-        customScenarioMaxLength:
-          MAX_CUSTOM_SCENARIO_LENGTH,
+customScenarioMaxLength:
+MAX_CUSTOM_SCENARIO_LENGTH,
 
-        vocabTestMaxWords:
-          MAX_VOCAB_TEST_WORDS,
+vocabTestMaxWords:
+MAX_VOCAB_TEST_WORDS,
 
-      },
+},
 
-    });
+});
 
-  }
+}
 );
 
 
@@ -4788,210 +5456,244 @@ app.get(
 
 
 app.get(
-  "/api/word",
-  (
-    req,
-    res
-  ) => {
+"/api/word",
+(
+req,
+res
+) => {
 
-    const language =
-      getLanguage(
-        String(
-          req.query.language ||
-          ""
-        ).toLowerCase()
-      );
+const dictionaryAllowed =
+applyFixedWindowLimit({
 
+store:
+dictionaryRateLimitStore,
 
-    if (
-      !language
-    ) {
+key:
+getClientIp(
+req
+),
 
-      return res
-        .status(
-          400
-        )
-        .json({
+limit:
+DICTIONARY_REQUESTS_PER_MINUTE,
 
-          error:
-            "Unknown language.",
+windowMs:
+ONE_MINUTE_MS,
 
-        });
+res,
 
-    }
+message:
+"Too many dictionary lookups. Please wait a moment and try again.",
+
+});
 
 
-    if (
-      !languageHasDictionary(
-        language
-      )
-    ) {
+if (
+!dictionaryAllowed
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return;
 
-          error:
-            `${language.name} does not currently use the local dictionary feature.`,
-
-        });
-
-    }
+}
 
 
-    const dictionaryContext =
-      dictionaries.get(
-        language.id
-      );
+const language =
+getLanguage(
+String(
+req.query.language ||
+""
+).toLowerCase()
+);
 
 
-    if (
-      !dictionaryContext
-    ) {
+if (
+!language
+) {
 
-      return res
-        .status(
-          503
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            `The ${language.name} dictionary is not available on the server.`,
+error:
+"Unknown language.",
 
-        });
+});
 
-    }
-
-
-    const word =
-      cleanLookupWord(
-        String(
-          req.query.word ||
-          ""
-        )
-      );
+}
 
 
-    const requestedPos =
-      String(
-        req.query.pos ||
-        ""
-      ).trim();
+if (
+!languageHasDictionary(
+language
+)
+) {
+
+return res
+.status(
+400
+)
+.json({
+
+error:
+`${language.name} does not currently use the local dictionary feature.`,
+
+});
+
+}
 
 
-    if (
-      !word ||
-      word.length >
-      80
-    ) {
-
-      return res
-        .status(
-          400
-        )
-        .json({
-
-          error:
-            "word must be a valid word of 80 characters or fewer.",
-
-        });
-
-    }
+const dictionaryContext =
+dictionaries.get(
+language.id
+);
 
 
-    try {
+if (
+!dictionaryContext
+) {
 
-      const rows =
-        dictionaryContext
-          .lookup
-          .all(
-            normalizeWord(
-              word,
-              language
-            )
-          );
+return res
+.status(
+503
+)
+.json({
 
+error:
+`The ${language.name} dictionary is not available on the server.`,
 
-      if (
-        !rows.length
-      ) {
+});
 
-        return res.json({
-
-          language:
-            language.id,
-
-          word,
-
-          found:
-            false,
-
-          entries: [],
-
-        });
-
-      }
+}
 
 
-      const entries =
-        compactDictionaryRows(
-          dictionaryContext,
-          language,
-          rows,
-          word,
-          requestedPos
-        );
+const word =
+cleanLookupWord(
+String(
+req.query.word ||
+""
+)
+);
 
 
-      return res.json({
-
-        language:
-          language.id,
-
-        word,
-
-        found:
-          entries.length >
-          0,
-
-        entries,
-
-      });
-
-    } catch (
-      error
-    ) {
-
-      console.error(
-        "Dictionary lookup failed",
-        {
-
-          language:
-            language.id,
-
-          message:
-            error?.message,
-
-        }
-      );
+const requestedPos =
+String(
+req.query.pos ||
+""
+).trim();
 
 
-      return res
-        .status(
-          500
-        )
-        .json({
+if (
+!word ||
+word.length >
+80
+) {
 
-          error:
-            "The dictionary lookup could not be completed.",
+return res
+.status(
+400
+)
+.json({
 
-        });
+error:
+"word must be a valid word of 80 characters or fewer.",
 
-    }
+});
 
-  }
+}
+
+
+try {
+
+const rows =
+dictionaryContext
+.lookup
+.all(
+normalizeWord(
+word,
+language
+)
+);
+
+
+if (
+!rows.length
+) {
+
+return res.json({
+
+language:
+language.id,
+
+word,
+
+found:
+false,
+
+entries: [],
+
+});
+
+}
+
+
+const entries =
+compactDictionaryRows(
+dictionaryContext,
+language,
+rows,
+word,
+requestedPos
+);
+
+
+return res.json({
+
+language:
+language.id,
+
+word,
+
+found:
+entries.length >
+0,
+
+entries,
+
+});
+
+} catch (
+error
+) {
+
+console.error(
+"Dictionary lookup failed",
+{
+
+language:
+language.id,
+
+message:
+error?.message,
+
+}
+);
+
+
+return res
+.status(
+500
+)
+.json({
+
+error:
+"The dictionary lookup could not be completed.",
+
+});
+
+}
+
+}
 );
 
 
@@ -5001,354 +5703,354 @@ app.get(
 
 
 app.get(
-  "/api/vocabulary",
-  async (
-    req,
-    res
-  ) => {
+"/api/vocabulary",
+async (
+req,
+res
+) => {
 
-    const auth =
-      await requireAuthenticatedUser(
-        req,
-        res
-      );
+const auth =
+await requireAuthenticatedUser(
+req,
+res
+);
 
 
-    if (
-      !auth
-    ) {
+if (
+!auth
+) {
 
-      return;
+return;
 
-    }
+}
 
 
-    const requestedLanguageId =
-      String(
-        req.query.language ||
-        ""
-      )
-        .trim()
-        .toLowerCase();
+const requestedLanguageId =
+String(
+req.query.language ||
+""
+)
+.trim()
+.toLowerCase();
 
 
-    let requestedLanguage =
-      null;
+let requestedLanguage =
+null;
 
 
-    if (
-      requestedLanguageId
-    ) {
+if (
+requestedLanguageId
+) {
 
-      requestedLanguage =
-        getLanguage(
-          requestedLanguageId
-        );
+requestedLanguage =
+getLanguage(
+requestedLanguageId
+);
 
 
-      if (
-        !requestedLanguage
-      ) {
+if (
+!requestedLanguage
+) {
 
-        return res
-          .status(
-            400
-          )
-          .json({
+return res
+.status(
+400
+)
+.json({
 
-            error:
-              "Unknown language.",
+error:
+"Unknown language.",
 
-          });
+});
 
-      }
+}
 
-    }
+}
 
 
-    try {
+try {
 
-      if (
-        requestedLanguage
-      ) {
+if (
+requestedLanguage
+) {
 
-        const [
-          rows,
-          chatRows,
-        ] =
-          await Promise.all([
+const [
+rows,
+chatRows,
+] =
+await Promise.all([
 
-            fetchOwnVocabularyRows({
+fetchOwnVocabularyRows({
 
-              accessToken:
-                auth.accessToken,
+accessToken:
+auth.accessToken,
 
-              userId:
-                auth.user.id,
+userId:
+auth.user.id,
 
-              languageId:
-                requestedLanguage.id,
+languageId:
+requestedLanguage.id,
 
-              fields:
-                "language,lemma",
+fields:
+"language,lemma",
 
-            }),
+}),
 
-            fetchOwnLanguageChatRows({
+fetchOwnLanguageChatRows({
 
-              accessToken:
-                auth.accessToken,
+accessToken:
+auth.accessToken,
 
-              userId:
-                auth.user.id,
+userId:
+auth.user.id,
 
-              languageId:
-                requestedLanguage.id,
+languageId:
+requestedLanguage.id,
 
-            }),
+}),
 
-          ]);
+]);
 
 
-        return res.json({
+return res.json({
 
-          language: {
+language: {
 
-            id:
-              requestedLanguage.id,
+id:
+requestedLanguage.id,
 
-            name:
-              requestedLanguage.name,
+name:
+requestedLanguage.name,
 
-          },
+},
 
-          count:
-            rows.length,
+count:
+rows.length,
 
-          chatSeconds:
-            Math.max(
-              0,
-              Number(
-                chatRows[
-                  0
-                ]?.total_chat_seconds ||
-                0
-              )
-            ),
+chatSeconds:
+Math.max(
+0,
+Number(
+chatRows[
+0
+]?.total_chat_seconds ||
+0
+)
+),
 
-          items:
-            rows.map(
-              row =>
-                row.lemma
-            ),
+items:
+rows.map(
+row =>
+row.lemma
+),
 
-        });
+});
 
-      }
+}
 
 
-      const [
-        rows,
-        totalChatSeconds,
-        languageChatRows,
-      ] =
-        await Promise.all([
+const [
+rows,
+totalChatSeconds,
+languageChatRows,
+] =
+await Promise.all([
 
-          fetchOwnVocabularyRows({
+fetchOwnVocabularyRows({
 
-            accessToken:
-              auth.accessToken,
+accessToken:
+auth.accessToken,
 
-            userId:
-              auth.user.id,
+userId:
+auth.user.id,
 
-            fields:
-              "language,lemma",
+fields:
+"language,lemma",
 
-          }),
+}),
 
-          fetchOwnTotalChatSeconds({
+fetchOwnTotalChatSeconds({
 
-            accessToken:
-              auth.accessToken,
+accessToken:
+auth.accessToken,
 
-            userId:
-              auth.user.id,
+userId:
+auth.user.id,
 
-          }),
+}),
 
-          fetchOwnLanguageChatRows({
+fetchOwnLanguageChatRows({
 
-            accessToken:
-              auth.accessToken,
+accessToken:
+auth.accessToken,
 
-            userId:
-              auth.user.id,
+userId:
+auth.user.id,
 
-          }),
+}),
 
-        ]);
+]);
 
 
-      const vocabCounts =
-        new Map();
+const vocabCounts =
+new Map();
 
 
-      for (
-        const row
-        of rows
-      ) {
+for (
+const row
+of rows
+) {
 
-        vocabCounts.set(
-          row.language,
-          (
-            vocabCounts.get(
-              row.language
-            ) ||
-            0
-          ) +
-          1
-        );
+vocabCounts.set(
+row.language,
+(
+vocabCounts.get(
+row.language
+) ||
+0
+) +
+1
+);
 
-      }
+}
 
 
-      const chatCounts =
-        new Map();
+const chatCounts =
+new Map();
 
 
-      for (
-        const row
-        of languageChatRows
-      ) {
+for (
+const row
+of languageChatRows
+) {
 
-        chatCounts.set(
-          row.language,
-          Math.max(
-            0,
-            Number(
-              row.total_chat_seconds ||
-              0
-            )
-          )
-        );
+chatCounts.set(
+row.language,
+Math.max(
+0,
+Number(
+row.total_chat_seconds ||
+0
+)
+)
+);
 
-      }
+}
 
 
-      const usedLanguageIds =
-        new Set([
-          ...vocabCounts.keys(),
-          ...chatCounts.keys(),
-        ]);
+const usedLanguageIds =
+new Set([
+...vocabCounts.keys(),
+...chatCounts.keys(),
+]);
 
 
-      const languages =
-        Object.values(
-          LANGUAGES
-        )
-          .filter(
-            language =>
-              usedLanguageIds.has(
-                language.id
-              )
-          )
-          .map(
-            language => ({
+const languages =
+Object.values(
+LANGUAGES
+)
+.filter(
+language =>
+usedLanguageIds.has(
+language.id
+)
+)
+.map(
+language => ({
 
-              id:
-                language.id,
+id:
+language.id,
 
-              name:
-                language.name,
+name:
+language.name,
 
-              count:
-                vocabCounts.get(
-                  language.id
-                ) ||
-                0,
+count:
+vocabCounts.get(
+language.id
+) ||
+0,
 
-              chatSeconds:
-                chatCounts.get(
-                  language.id
-                ) ||
-                0,
+chatSeconds:
+chatCounts.get(
+language.id
+) ||
+0,
 
-            })
-          );
+})
+);
 
 
-      const allocatedChatSeconds =
-        languageChatRows.reduce(
-          (
-            total,
-            row
-          ) =>
-            total +
-            Math.max(
-              0,
-              Number(
-                row.total_chat_seconds ||
-                0
-              )
-            ),
-          0
-        );
+const allocatedChatSeconds =
+languageChatRows.reduce(
+(
+total,
+row
+) =>
+total +
+Math.max(
+0,
+Number(
+row.total_chat_seconds ||
+0
+)
+),
+0
+);
 
 
-      const unallocatedChatSeconds =
-        Math.max(
-          0,
-          totalChatSeconds -
-          allocatedChatSeconds
-        );
+const unallocatedChatSeconds =
+Math.max(
+0,
+totalChatSeconds -
+allocatedChatSeconds
+);
 
 
-      return res.json({
+return res.json({
 
-        overallTotal:
-          rows.length,
+overallTotal:
+rows.length,
 
-        totalChatSeconds,
+totalChatSeconds,
 
-        unallocatedChatSeconds,
+unallocatedChatSeconds,
 
-        languages,
+languages,
 
-      });
+});
 
-    } catch (
-      error
-    ) {
+} catch (
+error
+) {
 
-      console.error(
-        "Vocabulary/statistics read failed",
-        {
+console.error(
+"Vocabulary/statistics read failed",
+{
 
-          userId:
-            auth.user.id,
+userId:
+auth.user.id,
 
-          message:
-            error?.message,
+message:
+error?.message,
 
-        }
-      );
+}
+);
 
 
-      return res
-        .status(
-          503
-        )
-        .json({
+return res
+.status(
+503
+)
+.json({
 
-          error:
-            "Learner statistics are temporarily unavailable.",
+error:
+"Learner statistics are temporarily unavailable.",
 
-        });
+});
 
-    }
+}
 
-  }
+}
 );
 
 
@@ -5358,635 +6060,695 @@ app.get(
 
 
 app.post(
-  "/api/start",
-  async (
-    req,
-    res
-  ) => {
+"/api/start",
+async (
+req,
+res
+) => {
 
-    const context =
-      getConversationContext(
-        req.body ??
-        {}
-      );
-
-
-    if (
-      context.error
-    ) {
-
-      return res
-        .status(
-          400
-        )
-        .json({
-
-          error:
-            context.error,
-
-        });
-
-    }
+const context =
+getConversationContext(
+req.body ??
+{}
+);
 
 
-    if (
-      context.scenarioKey !==
-      "custom"
-    ) {
+if (
+context.error
+) {
 
-      return res.json({
+return res
+.status(
+400
+)
+.json({
 
-        reply:
-          context.opening,
+error:
+context.error,
 
-        replyWords: [],
+});
 
-        conversationEnded:
-          false,
-
-      });
-
-    }
+}
 
 
-    try {
+if (
+context.scenarioKey !==
+"custom"
+) {
 
-      const parsed =
-        await createStructuredResponse({
+return res.json({
 
-          input: [
+reply:
+context.opening,
 
-            {
+replyWords: [],
 
-              role:
-                "system",
+conversationEnded:
+false,
 
-              content:
-                buildCustomOpeningPrompt(
-                  context
-                ),
+});
 
-            },
-
-            {
-
-              role:
-                "user",
-
-              content:
-                "Begin the role-play now.",
-
-            },
-
-          ],
-
-          schema:
-            makeCustomOpeningSchema(
-              context.dictionaryEnabled
-            ),
-
-          schemaName:
-            "language_learning_custom_opening",
-
-          maxOutputTokens:
-            900,
-
-        });
+}
 
 
-      return res.json({
+const aiAccess =
+await acquireAIRequestSlot(
+req,
+res
+);
 
-        reply:
-          parsed.reply,
 
-        replyWords:
-          context.dictionaryEnabled
-            ? alignWordMetadata(
-                parsed.reply,
-                parsed.replyWords
-              )
-            : [],
+if (
+!aiAccess
+) {
 
-        conversationEnded:
-          false,
+return;
 
-      });
+}
 
-    } catch (
-      error
-    ) {
 
-      return sendAIError(
-        res,
-        error
-      );
+try {
 
-    }
+const parsed =
+await createStructuredResponse({
 
-  }
+input: [
+
+{
+
+role:
+"system",
+
+content:
+buildCustomOpeningPrompt(
+context
+),
+
+},
+
+{
+
+role:
+"user",
+
+content:
+"Begin the role-play now.",
+
+},
+
+],
+
+schema:
+makeCustomOpeningSchema(
+context.dictionaryEnabled
+),
+
+schemaName:
+"language_learning_custom_opening",
+
+maxOutputTokens:
+900,
+
+});
+
+
+return res.json({
+
+reply:
+parsed.reply,
+
+replyWords:
+context.dictionaryEnabled
+? alignWordMetadata(
+parsed.reply,
+parsed.replyWords
+)
+: [],
+
+conversationEnded:
+false,
+
+});
+
+} catch (
+error
+) {
+
+return sendAIError(
+res,
+error
+);
+
+} finally {
+
+aiAccess.release();
+
+}
+
+}
 );
 
 
 app.post(
-  "/api/chat",
-  async (
-    req,
-    res
-  ) => {
+"/api/chat",
+async (
+req,
+res
+) => {
 
-    const context =
-      getConversationContext(
-        req.body ??
-        {}
-      );
+const context =
+getConversationContext(
+req.body ??
+{}
+);
 
 
-    if (
-      context.error
-    ) {
+if (
+context.error
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            context.error,
+error:
+context.error,
 
-        });
+});
 
-    }
+}
 
 
-    const {
-      message,
-      history,
-    } =
-      req.body ??
-      {};
+const {
+message,
+history,
+} =
+req.body ??
+{};
 
 
-    if (
-      typeof message !==
-        "string" ||
-      !message.trim()
-    ) {
+if (
+typeof message !==
+"string" ||
+!message.trim()
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "message must be a non-empty string.",
+error:
+"message must be a non-empty string.",
 
-        });
+});
 
-    }
+}
 
 
-    if (
-      message.length >
-      MAX_MESSAGE_LENGTH
-    ) {
+if (
+message.length >
+MAX_MESSAGE_LENGTH
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            `message is too long. Maximum: ${MAX_MESSAGE_LENGTH} characters.`,
+error:
+`message is too long. Maximum: ${MAX_MESSAGE_LENGTH} characters.`,
 
-        });
+});
 
-    }
+}
 
 
-    const historyResult =
-      validateHistory(
-        history
-      );
+const historyResult =
+validateHistory(
+history
+);
 
 
-    if (
-      historyResult.error
-    ) {
+if (
+historyResult.error
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            historyResult.error,
+error:
+historyResult.error,
 
-        });
+});
 
-    }
+}
 
 
-    const input = [
+const input = [
 
-      {
+{
 
-        role:
-          "system",
+role:
+"system",
 
-        content:
-          buildSystemPrompt(
-            context
-          ),
+content:
+buildSystemPrompt(
+context
+),
 
-      },
+},
 
-      ...historyResult.history,
+...historyResult.history,
 
-      {
+{
 
-        role:
-          "user",
+role:
+"user",
 
-        content:
-          message.trim(),
+content:
+message.trim(),
 
-      },
+},
 
-    ];
+];
 
 
-    const optionalUserPromise =
-      getOptionalAuthenticatedUser(
-        req
-      );
+const aiAccess =
+await acquireAIRequestSlot(
+req,
+res
+);
 
 
-    const chatSeconds =
-      Math.max(
-        0,
-        Math.min(
-          360,
-          Math.round(
-            Number(
-              req.body
-                ?.chatSecondsSinceLastMessage
-            ) ||
-            0
-          )
-        )
-      );
+if (
+!aiAccess
+) {
 
+return;
 
-    try {
+}
 
-      const parsed =
-        await createStructuredResponse({
 
-          input,
+const optionalUserPromise =
+Promise.resolve(
+aiAccess.user
+);
 
-          schema:
-            makeChatResponseSchema(
-              context.dictionaryEnabled
-            ),
 
-          schemaName:
-            "language_learning_chat_response",
+const chatSeconds =
+Math.max(
+0,
+Math.min(
+360,
+Math.round(
+Number(
+req.body
+?.chatSecondsSinceLastMessage
+) ||
+0
+)
+)
+);
 
-          maxOutputTokens:
-            1000,
 
-        });
+try {
 
+const parsed =
+await createStructuredResponse({
 
-      void optionalUserPromise
-        .then(
-          async user => {
+input,
 
-            if (
-              !user
-            ) {
+schema:
+makeChatResponseSchema(
+context.dictionaryEnabled
+),
 
-              return;
+schemaName:
+"language_learning_chat_response",
 
-            }
+maxOutputTokens:
+1000,
 
+});
 
-            const tasks =
-              [];
 
+void optionalUserPromise
+.then(
+async user => {
 
-            if (
-              chatSeconds >
-              0
-            ) {
+if (
+!user
+) {
 
-              tasks.push(
+return;
 
-                recordChatSeconds(
-                  user.id,
-                  context.language.id,
-                  chatSeconds
-                ).catch(
-                  error => {
+}
 
-                    console.error(
-                      "Chat time persistence failed",
-                      {
 
-                        userId:
-                          user.id,
+const tasks =
+[];
 
-                        language:
-                          context.language.id,
 
-                        message:
-                          error?.message,
+if (
+chatSeconds >
+0
+) {
 
-                      }
-                    );
+tasks.push(
 
-                  }
-                )
+recordChatSeconds(
+user.id,
+context.language.id,
+chatSeconds
+).catch(
+error => {
 
-              );
+console.error(
+"Chat time persistence failed",
+{
 
-            }
+userId:
+user.id,
 
+language:
+context.language.id,
 
-            if (
-              parsed.feedback
-                ?.hasIssues ===
-                false &&
-              context.dictionaryEnabled
-            ) {
+message:
+error?.message,
 
-              const vocabularyItems =
-                extractLearnerVocabulary(
-                  message.trim(),
-                  context.language
-                );
+}
+);
 
+}
+)
 
-              if (
-                vocabularyItems.length
-              ) {
+);
 
-                tasks.push(
+}
 
-                  recordVocabularySuccesses({
 
-                    userId:
-                      user.id,
+if (
+parsed.feedback
+?.hasIssues ===
+false &&
+context.dictionaryEnabled
+) {
 
-                    languageId:
-                      context.language.id,
+const vocabularyItems =
+extractLearnerVocabulary(
+message.trim(),
+context.language
+);
 
-                    items:
-                      vocabularyItems,
 
-                  }).catch(
-                    error => {
+if (
+vocabularyItems.length
+) {
 
-                      console.error(
-                        "Vocabulary persistence failed",
-                        {
+tasks.push(
 
-                          language:
-                            context.language.id,
+recordVocabularySuccesses({
 
-                          message:
-                            error?.message,
+userId:
+user.id,
 
-                        }
-                      );
+languageId:
+context.language.id,
 
-                    }
-                  )
+items:
+vocabularyItems,
 
-                );
+}).catch(
+error => {
 
-              }
+console.error(
+"Vocabulary persistence failed",
+{
 
-            }
+language:
+context.language.id,
 
+message:
+error?.message,
 
-            await Promise.allSettled(
-              tasks
-            );
+}
+);
 
-          }
-        )
-        .catch(
-          error => {
+}
+)
 
-            console.error(
-              "Optional learner-stat persistence failed",
-              {
+);
 
-                message:
-                  error?.message,
+}
 
-              }
-            );
+}
 
-          }
-        );
 
+await Promise.allSettled(
+tasks
+);
 
-      return res.json({
+}
+)
+.catch(
+error => {
 
-        reply:
-          parsed.reply,
+console.error(
+"Optional learner-stat persistence failed",
+{
 
-        replyWords:
-          context.dictionaryEnabled
-            ? alignWordMetadata(
-                parsed.reply,
-                parsed.replyWords
-              )
-            : [],
+message:
+error?.message,
 
-        feedback:
-          parsed.feedback,
+}
+);
 
-        conversationEnded:
-          Boolean(
-            parsed.conversationEnded
-          ),
+}
+);
 
-      });
 
-    } catch (
-      error
-    ) {
+return res.json({
 
-      return sendAIError(
-        res,
-        error
-      );
+reply:
+parsed.reply,
 
-    }
+replyWords:
+context.dictionaryEnabled
+? alignWordMetadata(
+parsed.reply,
+parsed.replyWords
+)
+: [],
 
-  }
+feedback:
+parsed.feedback,
+
+conversationEnded:
+Boolean(
+parsed.conversationEnded
+),
+
+});
+
+} catch (
+error
+) {
+
+return sendAIError(
+res,
+error
+);
+
+} finally {
+
+aiAccess.release();
+
+}
+
+}
 );
 
 
 app.post(
-  "/api/example",
-  async (
-    req,
-    res
-  ) => {
+"/api/example",
+async (
+req,
+res
+) => {
 
-    const context =
-      getConversationContext(
-        req.body ??
-        {}
-      );
-
-
-    if (
-      context.error
-    ) {
-
-      return res
-        .status(
-          400
-        )
-        .json({
-
-          error:
-            context.error,
-
-        });
-
-    }
+const context =
+getConversationContext(
+req.body ??
+{}
+);
 
 
-    const historyResult =
-      validateHistory(
-        req.body?.history
-      );
+if (
+context.error
+) {
+
+return res
+.status(
+400
+)
+.json({
+
+error:
+context.error,
+
+});
+
+}
 
 
-    if (
-      historyResult.error
-    ) {
-
-      return res
-        .status(
-          400
-        )
-        .json({
-
-          error:
-            historyResult.error,
-
-        });
-
-    }
+const historyResult =
+validateHistory(
+req.body?.history
+);
 
 
-    const input = [
+if (
+historyResult.error
+) {
 
-      {
+return res
+.status(
+400
+)
+.json({
 
-        role:
-          "system",
+error:
+historyResult.error,
 
-        content:
-          buildExamplePrompt(
-            context
-          ),
+});
 
-      },
-
-      ...historyResult.history,
-
-      {
-
-        role:
-          "user",
-
-        content:
-          "Generate the learner's next example response and then continue the role-play as specified.",
-
-      },
-
-    ];
+}
 
 
-    try {
+const input = [
 
-      const parsed =
-        await createStructuredResponse({
+{
 
-          input,
+role:
+"system",
 
-          schema:
-            makeExampleResponseSchema(
-              context.dictionaryEnabled
-            ),
+content:
+buildExamplePrompt(
+context
+),
 
-          schemaName:
-            "language_learning_example_response",
+},
 
-          maxOutputTokens:
-            1400,
+...historyResult.history,
 
-        });
+{
+
+role:
+"user",
+
+content:
+"Generate the learner's next example response and then continue the role-play as specified.",
+
+},
+
+];
 
 
-      return res.json({
+const aiAccess =
+await acquireAIRequestSlot(
+req,
+res
+);
 
-        exampleMessage:
-          parsed.exampleMessage,
 
-        exampleTranslation:
-          parsed.exampleTranslation,
+if (
+!aiAccess
+) {
 
-        exampleWords:
-          context.dictionaryEnabled
-            ? alignWordMetadata(
-                parsed.exampleMessage,
-                parsed.exampleWords
-              )
-            : [],
+return;
 
-        reply:
-          parsed.reply,
+}
 
-        replyWords:
-          context.dictionaryEnabled
-            ? alignWordMetadata(
-                parsed.reply,
-                parsed.replyWords
-              )
-            : [],
 
-        conversationEnded:
-          Boolean(
-            parsed.conversationEnded
-          ),
+try {
 
-      });
+const parsed =
+await createStructuredResponse({
 
-    } catch (
-      error
-    ) {
+input,
 
-      return sendAIError(
-        res,
-        error
-      );
+schema:
+makeExampleResponseSchema(
+context.dictionaryEnabled
+),
 
-    }
+schemaName:
+"language_learning_example_response",
 
-  }
+maxOutputTokens:
+1400,
+
+});
+
+
+return res.json({
+
+exampleMessage:
+parsed.exampleMessage,
+
+exampleTranslation:
+parsed.exampleTranslation,
+
+exampleWords:
+context.dictionaryEnabled
+? alignWordMetadata(
+parsed.exampleMessage,
+parsed.exampleWords
+)
+: [],
+
+reply:
+parsed.reply,
+
+replyWords:
+context.dictionaryEnabled
+? alignWordMetadata(
+parsed.reply,
+parsed.replyWords
+)
+: [],
+
+conversationEnded:
+Boolean(
+parsed.conversationEnded
+),
+
+});
+
+} catch (
+error
+) {
+
+return sendAIError(
+res,
+error
+);
+
+} finally {
+
+aiAccess.release();
+
+}
+
+}
 );
 
 
@@ -5996,905 +6758,937 @@ app.post(
 
 
 app.post(
-  "/api/vocab-test/start",
-  async (
-    req,
-    res
-  ) => {
+"/api/vocab-test/start",
+async (
+req,
+res
+) => {
 
-    cleanupVocabTestSessions();
+cleanupVocabTestSessions();
 
 
-    const language =
-      getLanguage(
-        String(
-          req.body?.language ||
-          ""
-        ).toLowerCase()
-      );
+const language =
+getLanguage(
+String(
+req.body?.language ||
+""
+).toLowerCase()
+);
 
 
-    if (
-      !language
-    ) {
+if (
+!language
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "Unknown language.",
+error:
+"Unknown language.",
 
-        });
+});
 
-    }
+}
 
 
-    if (
-      !languageHasDictionary(
-        language
-      ) ||
-      !dictionaries.has(
-        language.id
-      )
-    ) {
+if (
+!languageHasDictionary(
+language
+) ||
+!dictionaries.has(
+language.id
+)
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            `${language.name} does not currently support vocabulary tests.`,
+error:
+`${language.name} does not currently support vocabulary tests.`,
 
-        });
+});
 
-    }
+}
 
 
-    const count =
-      Math.round(
-        Number(
-          req.body?.count
-        )
-      );
+const count =
+Math.round(
+Number(
+req.body?.count
+)
+);
 
 
-    if (
-      !Number.isInteger(
-        count
-      ) ||
-      count <
-        1 ||
-      count >
-        MAX_VOCAB_TEST_WORDS
-    ) {
+if (
+!Number.isInteger(
+count
+) ||
+count <
+1 ||
+count >
+MAX_VOCAB_TEST_WORDS
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            `count must be between 1 and ${MAX_VOCAB_TEST_WORDS}.`,
+error:
+`count must be between 1 and ${MAX_VOCAB_TEST_WORDS}.`,
 
-        });
+});
 
-    }
+}
 
 
-    const sourceMode =
-      String(
-        req.body?.sourceMode ||
-        ""
-      );
+const sourceMode =
+String(
+req.body?.sourceMode ||
+""
+);
 
 
-    const quizMode =
-      String(
-        req.body?.quizMode ||
-        ""
-      );
+const quizMode =
+String(
+req.body?.quizMode ||
+""
+);
 
 
-    if (
-      ![
-        "random",
-        "my_vocab",
-        "new_vocab",
-      ].includes(
-        sourceMode
-      )
-    ) {
+if (
+![
+"random",
+"my_vocab",
+"new_vocab",
+].includes(
+sourceMode
+)
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "Unknown vocabulary source mode.",
+error:
+"Unknown vocabulary source mode.",
 
-        });
+});
 
-    }
+}
 
 
-    if (
-      ![
-        "multiple_choice",
-        "hardcore",
-      ].includes(
-        quizMode
-      )
-    ) {
+if (
+![
+"multiple_choice",
+"hardcore",
+].includes(
+quizMode
+)
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "Unknown vocabulary test mode.",
+error:
+"Unknown vocabulary test mode.",
 
-        });
+});
 
-    }
+}
 
 
-    const accessToken =
-      getBearerToken(
-        getAuthorizationHeader(
-          req
-        )
-      );
+const accessToken =
+getBearerToken(
+getAuthorizationHeader(
+req
+)
+);
 
 
-    let authenticatedUser =
-      null;
+let authenticatedUser =
+null;
 
 
-    let verifiedAccessToken =
-      null;
+let verifiedAccessToken =
+null;
 
 
-    if (
-      accessToken
-    ) {
+if (
+accessToken
+) {
 
-      const verification =
-        await verifySupabaseAccessToken(
-          accessToken
-        );
+const verification =
+await verifySupabaseAccessToken(
+accessToken
+);
 
 
-      if (
-        verification.status ===
-        "authenticated"
-      ) {
+if (
+verification.status ===
+"authenticated"
+) {
 
-        authenticatedUser =
-          verification.user;
+authenticatedUser =
+verification.user;
 
 
-        verifiedAccessToken =
-          accessToken;
+verifiedAccessToken =
+accessToken;
 
-      } else if (
-        [
-          "my_vocab",
-          "new_vocab",
-        ].includes(
-          sourceMode
-        )
-      ) {
+} else if (
+[
+"my_vocab",
+"new_vocab",
+].includes(
+sourceMode
+)
+) {
 
-        return res
-          .status(
-            401
-          )
-          .json({
+return res
+.status(
+401
+)
+.json({
 
-            error:
-              "Please log in to use this vocabulary source.",
+error:
+"Please log in to use this vocabulary source.",
 
-          });
+});
 
-      }
+}
 
-    }
+}
 
 
-    if (
-      [
-        "my_vocab",
-        "new_vocab",
-      ].includes(
-        sourceMode
-      ) &&
-      !authenticatedUser
-    ) {
+if (
+[
+"my_vocab",
+"new_vocab",
+].includes(
+sourceMode
+) &&
+!authenticatedUser
+) {
 
-      return res
-        .status(
-          401
-        )
-        .json({
+return res
+.status(
+401
+)
+.json({
 
-          error:
-            "Please log in to use this vocabulary source.",
+error:
+"Please log in to use this vocabulary source.",
 
-        });
+});
 
-    }
+}
 
 
-    try {
+try {
 
-      let selected =
-        [];
+let selected =
+[];
 
 
-      let knownRows =
-        [];
+let knownRows =
+[];
 
 
-      if (
-        sourceMode ===
-        "random"
-      ) {
+if (
+sourceMode ===
+"random"
+) {
 
-        selected =
-          getRandomDictionaryTestItems(
-            language,
-            count
-          );
+selected =
+getRandomDictionaryTestItems(
+language,
+count
+);
 
-      } else {
+} else {
 
-        knownRows =
-          await fetchOwnVocabularyRows({
+knownRows =
+await fetchOwnVocabularyRows({
 
-            accessToken:
-              verifiedAccessToken,
+accessToken:
+verifiedAccessToken,
 
-            userId:
-              authenticatedUser.id,
+userId:
+authenticatedUser.id,
 
-            languageId:
-              language.id,
+languageId:
+language.id,
 
-          });
+});
 
 
-        if (
-          sourceMode ===
-          "my_vocab"
-        ) {
+if (
+sourceMode ===
+"my_vocab"
+) {
 
-          const usable =
-            [];
+const usable =
+[];
 
 
-          const seen =
-            new Set();
+const seen =
+new Set();
 
 
-          for (
-            const row
-            of shuffle(
-              knownRows
-            )
-          ) {
+for (
+const row
+of shuffle(
+knownRows
+)
+) {
 
-            const item =
-              resolveTestItemFromWord(
-                row.lemma,
-                language,
-                {
+const item =
+resolveTestItemFromWord(
+row.lemma,
+language,
+{
 
-                  preferStoredLemma:
-                    true,
+preferStoredLemma:
+true,
 
-                }
-              );
+}
+);
 
 
-            if (
-              !item ||
-              seen.has(
-                item.lemmaKey
-              )
-            ) {
+if (
+!item ||
+seen.has(
+item.lemmaKey
+)
+) {
 
-              continue;
+continue;
 
-            }
+}
 
 
-            seen.add(
-              item.lemmaKey
-            );
+seen.add(
+item.lemmaKey
+);
 
 
-            usable.push(
-              item
-            );
+usable.push(
+item
+);
 
 
-            if (
-              usable.length >=
-              count
-            ) {
+if (
+usable.length >=
+count
+) {
 
-              break;
+break;
 
-            }
+}
 
-          }
+}
 
 
-          if (
-            usable.length <
-            count
-          ) {
+if (
+usable.length <
+count
+) {
 
-            return res
-              .status(
-                400
-              )
-              .json({
+return res
+.status(
+400
+)
+.json({
 
-                error:
-                  `You currently have ${usable.length} usable ${language.name} vocabulary item${
-                    usable.length ===
-                    1
-                      ? ""
-                      : "s"
-                  }. Choose a smaller test size or add more vocabulary first.`,
+error:
+`You currently have ${usable.length} usable ${language.name} vocabulary item${
+usable.length ===
+1
+? ""
+: "s"
+}. Choose a smaller test size or add more vocabulary first.`,
 
-              });
+});
 
-          }
+}
 
 
-          selected =
-            usable;
+selected =
+usable;
 
-        } else {
+} else {
 
-          selected =
-            await chooseNewVocabularyWithAI(
-              language,
-              knownRows,
-              count
-            );
+const aiAccess =
+await acquireAIRequestSlot(
+req,
+res,
+{
 
+authenticatedUser,
 
-          if (
-            selected.length <
-            count
-          ) {
+authenticationAlreadyChecked:
+true,
 
-            return res
-              .status(
-                502
-              )
-              .json({
+}
+);
 
-                error:
-                  "The AI could not produce enough valid new dictionary words for this test. Please try again.",
 
-              });
+if (
+!aiAccess
+) {
 
-          }
+return;
 
-        }
+}
 
-      }
 
+try {
 
-      if (
-        selected.length <
-        count
-      ) {
+selected =
+await chooseNewVocabularyWithAI(
+language,
+knownRows,
+count
+);
 
-        return res
-          .status(
-            503
-          )
-          .json({
+} finally {
 
-            error:
-              "The dictionary could not provide enough usable words for this test.",
+aiAccess.release();
 
-          });
+}
 
-      }
 
+if (
+selected.length <
+count
+) {
 
-      selected =
-        selected.slice(
-          0,
-          count
-        );
+return res
+.status(
+502
+)
+.json({
 
+error:
+"The AI could not produce enough valid new dictionary words for this test. Please try again.",
 
-      if (
-        quizMode ===
-        "multiple_choice"
-      ) {
+});
 
-        addMultipleChoiceOptions(
-          selected,
-          language
-        );
+}
 
-      }
+}
 
+}
 
-      const testId =
-        randomUUID();
 
+if (
+selected.length <
+count
+) {
 
-      const questions =
-        selected.map(
-          item => ({
+return res
+.status(
+503
+)
+.json({
 
-            id:
-              randomUUID(),
+error:
+"The dictionary could not provide enough usable words for this test.",
 
-            ...item,
+});
 
-            answered:
-              false,
+}
 
-          })
-        );
 
+selected =
+selected.slice(
+0,
+count
+);
 
-      vocabTestSessions.set(
-        testId,
-        {
 
-          createdAt:
-            Date.now(),
+if (
+quizMode ===
+"multiple_choice"
+) {
 
-          userId:
-            authenticatedUser?.id ||
-            null,
+addMultipleChoiceOptions(
+selected,
+language
+);
 
-          languageId:
-            language.id,
+}
 
-          sourceMode,
 
-          quizMode,
+const testId =
+randomUUID();
 
-          questions,
 
-        }
-      );
+const questions =
+selected.map(
+item => ({
 
+id:
+randomUUID(),
 
-      return res.json({
+...item,
 
-        testId,
+answered:
+false,
 
-        language: {
+})
+);
 
-          id:
-            language.id,
 
-          name:
-            language.name,
+vocabTestSessions.set(
+testId,
+{
 
-        },
+createdAt:
+Date.now(),
 
-        sourceMode,
+userId:
+authenticatedUser?.id ||
+null,
 
-        quizMode,
+languageId:
+language.id,
 
-        count:
-          questions.length,
+sourceMode,
 
-        savesCorrectAnswers:
-          Boolean(
-            authenticatedUser &&
-            quizMode ===
-              "hardcore"
-          ),
+quizMode,
 
-        questions:
-          questions.map(
-            question => ({
+questions,
 
-              id:
-                question.id,
+}
+);
 
-              prompt:
-                question.prompt,
 
-              partOfSpeech:
-                question.partOfSpeech,
+return res.json({
 
-              options:
-                quizMode ===
-                "multiple_choice"
-                  ? question.options
-                  : undefined,
+testId,
 
-            })
-          ),
+language: {
 
-      });
+id:
+language.id,
 
-    } catch (
-      error
-    ) {
+name:
+language.name,
 
-      if (
-        error instanceof
-        AIOutputError ||
-        error?.status
-      ) {
+},
 
-        return sendAIError(
-          res,
-          error
-        );
+sourceMode,
 
-      }
+quizMode,
 
+count:
+questions.length,
 
-      console.error(
-        "Vocabulary test creation failed",
-        {
+savesCorrectAnswers:
+Boolean(
+authenticatedUser &&
+quizMode ===
+"hardcore"
+),
 
-          language:
-            language.id,
+questions:
+questions.map(
+question => ({
 
-          sourceMode,
+id:
+question.id,
 
-          message:
-            error?.message,
+prompt:
+question.prompt,
 
-        }
-      );
+partOfSpeech:
+question.partOfSpeech,
 
+options:
+quizMode ===
+"multiple_choice"
+? question.options
+: undefined,
 
-      return res
-        .status(
-          503
-        )
-        .json({
+})
+),
 
-          error:
-            "The vocabulary test could not be created.",
+});
 
-        });
+} catch (
+error
+) {
 
-    }
+if (
+error instanceof
+AIOutputError ||
+error?.status
+) {
 
-  }
+return sendAIError(
+res,
+error
+);
+
+}
+
+
+console.error(
+"Vocabulary test creation failed",
+{
+
+language:
+language.id,
+
+sourceMode,
+
+message:
+error?.message,
+
+}
+);
+
+
+return res
+.status(
+503
+)
+.json({
+
+error:
+"The vocabulary test could not be created.",
+
+});
+
+}
+
+}
 );
 
 
 app.post(
-  "/api/vocab-test/answer",
-  async (
-    req,
-    res
-  ) => {
+"/api/vocab-test/answer",
+async (
+req,
+res
+) => {
 
-    cleanupVocabTestSessions();
+cleanupVocabTestSessions();
 
 
-    const testId =
-      String(
-        req.body?.testId ||
-        ""
-      );
+const testId =
+String(
+req.body?.testId ||
+""
+);
 
 
-    const questionId =
-      String(
-        req.body?.questionId ||
-        ""
-      );
+const questionId =
+String(
+req.body?.questionId ||
+""
+);
 
 
-    const answer =
-      exactAnswerKey(
-        req.body?.answer
-      );
+const answer =
+exactAnswerKey(
+req.body?.answer
+);
 
 
-    if (
-      !testId ||
-      !questionId ||
-      !answer
-    ) {
+if (
+!testId ||
+!questionId ||
+!answer
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "testId, questionId and answer are required.",
+error:
+"testId, questionId and answer are required.",
 
-        });
+});
 
-    }
+}
 
 
-    const testSession =
-      vocabTestSessions.get(
-        testId
-      );
+const testSession =
+vocabTestSessions.get(
+testId
+);
 
 
-    if (
-      !testSession
-    ) {
+if (
+!testSession
+) {
 
-      return res
-        .status(
-          410
-        )
-        .json({
+return res
+.status(
+410
+)
+.json({
 
-          error:
-            "This vocabulary test has expired. Please start a new test.",
+error:
+"This vocabulary test has expired. Please start a new test.",
 
-        });
+});
 
-    }
+}
 
 
-    if (
-      testSession.userId
-    ) {
+if (
+testSession.userId
+) {
 
-      const auth =
-        await requireAuthenticatedUser(
-          req,
-          res
-        );
+const auth =
+await requireAuthenticatedUser(
+req,
+res
+);
 
 
-      if (
-        !auth
-      ) {
+if (
+!auth
+) {
 
-        return;
+return;
 
-      }
+}
 
 
-      if (
-        auth.user.id !==
-        testSession.userId
-      ) {
+if (
+auth.user.id !==
+testSession.userId
+) {
 
-        return res
-          .status(
-            403
-          )
-          .json({
+return res
+.status(
+403
+)
+.json({
 
-            error:
-              "This vocabulary test belongs to another account.",
+error:
+"This vocabulary test belongs to another account.",
 
-          });
+});
 
-      }
+}
 
-    }
+}
 
 
-    const question =
-      testSession.questions.find(
-        item =>
-          item.id ===
-          questionId
-      );
+const question =
+testSession.questions.find(
+item =>
+item.id ===
+questionId
+);
 
 
-    if (
-      !question
-    ) {
+if (
+!question
+) {
 
-      return res
-        .status(
-          404
-        )
-        .json({
+return res
+.status(
+404
+)
+.json({
 
-          error:
-            "Question not found.",
+error:
+"Question not found.",
 
-        });
+});
 
-    }
+}
 
 
-    if (
-      question.answered
-    ) {
+if (
+question.answered
+) {
 
-      return res
-        .status(
-          409
-        )
-        .json({
+return res
+.status(
+409
+)
+.json({
 
-          error:
-            "This question has already been answered.",
+error:
+"This question has already been answered.",
 
-        });
+});
 
-    }
+}
 
 
-    const matchingAnswer =
-      question.acceptedAnswers.find(
-        candidate =>
-          exactAnswerKey(
-            candidate
-          ) ===
-          answer
-      );
+const matchingAnswer =
+question.acceptedAnswers.find(
+candidate =>
+exactAnswerKey(
+candidate
+) ===
+answer
+);
 
 
-    const correct =
-      Boolean(
-        matchingAnswer
-      );
+const correct =
+Boolean(
+matchingAnswer
+);
 
 
-    question.answered =
-      true;
+question.answered =
+true;
 
 
-    let recorded =
-      false;
+let recorded =
+false;
 
 
-    /*
-      Multiple choice affects only the current quiz score.
+/*
+Multiple choice affects only the current quiz score.
 
-      Only a correct Hardcore answer becomes persistent
-      vocabulary evidence.
-    */
+Only a correct Hardcore answer becomes persistent
+vocabulary evidence.
+*/
 
-    if (
-      correct &&
-      testSession.userId &&
-      testSession.quizMode ===
-        "hardcore"
-    ) {
+if (
+correct &&
+testSession.userId &&
+testSession.quizMode ===
+"hardcore"
+) {
 
-      const language =
-        getLanguage(
-          testSession.languageId
-        );
+const language =
+getLanguage(
+testSession.languageId
+);
 
 
-      const lemmaToRecord =
-        matchingAnswer;
+const lemmaToRecord =
+matchingAnswer;
 
 
-      const resolved =
-        resolveTestItemFromWord(
-          lemmaToRecord,
-          language,
-          {
+const resolved =
+resolveTestItemFromWord(
+lemmaToRecord,
+language,
+{
 
-            preferStoredLemma:
-              true,
+preferStoredLemma:
+true,
 
-          }
-        );
+}
+);
 
 
-      try {
+try {
 
-        await recordVocabularyTestSuccess({
+await recordVocabularyTestSuccess({
 
-          userId:
-            testSession.userId,
+userId:
+testSession.userId,
 
-          languageId:
-            testSession.languageId,
+languageId:
+testSession.languageId,
 
-          lemma:
-            lemmaToRecord,
+lemma:
+lemmaToRecord,
 
-          lemmaKey:
-            normalizeWord(
-              lemmaToRecord,
-              language
-            ),
+lemmaKey:
+normalizeWord(
+lemmaToRecord,
+language
+),
 
-          partOfSpeech:
-            resolved?.partOfSpeech ||
-            question.partOfSpeech ||
-            null,
+partOfSpeech:
+resolved?.partOfSpeech ||
+question.partOfSpeech ||
+null,
 
-        });
+});
 
 
-        recorded =
-          true;
+recorded =
+true;
 
-      } catch (
-        error
-      ) {
+} catch (
+error
+) {
 
-        console.error(
-          "Hardcore vocabulary-test success persistence failed",
-          {
+console.error(
+"Hardcore vocabulary-test success persistence failed",
+{
 
-            userId:
-              testSession.userId,
+userId:
+testSession.userId,
 
-            language:
-              testSession.languageId,
+language:
+testSession.languageId,
 
-            lemma:
-              lemmaToRecord,
+lemma:
+lemmaToRecord,
 
-            message:
-              error?.message,
+message:
+error?.message,
 
-          }
-        );
+}
+);
 
-      }
+}
 
-    }
+}
 
 
-    if (
-      testSession.questions.every(
-        item =>
-          item.answered
-      )
-    ) {
+if (
+testSession.questions.every(
+item =>
+item.answered
+)
+) {
 
-      setTimeout(
-        () =>
-          vocabTestSessions.delete(
-            testId
-          ),
-        60 *
-        1000
-      ).unref?.();
+setTimeout(
+() =>
+vocabTestSessions.delete(
+testId
+),
+60 *
+1000
+).unref?.();
 
-    }
+}
 
 
-    return res.json({
+return res.json({
 
-      correct,
+correct,
 
-      recorded,
+recorded,
 
-      correctAnswers:
-        question.acceptedAnswers,
+correctAnswers:
+question.acceptedAnswers,
 
-    });
+});
 
-  }
+}
 );
 
 
@@ -6904,57 +7698,57 @@ app.post(
 
 
 app.use(
-  (
-    err,
-    req,
-    res,
-    next
-  ) => {
+(
+err,
+req,
+res,
+next
+) => {
 
-    if (
-      err instanceof
-        SyntaxError &&
-      "body" in
-        err
-    ) {
+if (
+err instanceof
+SyntaxError &&
+"body" in
+err
+) {
 
-      return res
-        .status(
-          400
-        )
-        .json({
+return res
+.status(
+400
+)
+.json({
 
-          error:
-            "Request body must contain valid JSON.",
+error:
+"Request body must contain valid JSON.",
 
-        });
+});
 
-    }
-
-
-    console.error(
-      "Unexpected server error",
-      {
-
-        message:
-          err?.message,
-
-      }
-    );
+}
 
 
-    return res
-      .status(
-        500
-      )
-      .json({
+console.error(
+"Unexpected server error",
+{
 
-        error:
-          "Unexpected server error.",
+message:
+err?.message,
 
-      });
+}
+);
 
-  }
+
+return res
+.status(
+500
+)
+.json({
+
+error:
+"Unexpected server error.",
+
+});
+
+}
 );
 
 
@@ -6964,13 +7758,13 @@ app.use(
 
 
 app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
+PORT,
+"0.0.0.0",
+() => {
 
-    console.log(
-      `Server listening on port ${PORT}`
-    );
+console.log(
+`Server listening on port ${PORT}`
+);
 
-  }
+}
 );
